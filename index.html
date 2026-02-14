@@ -943,6 +943,8 @@ const G=(()=>{
 
       // Load texture once if available
       let texture=null;
+      // Detect vertex colours BEFORE finishBuild — used by ghost + pieces
+      const hasVertCol=nf[0]&&nf[0].col&&nf[0].col.length>0;
       function finishBuild(){
         // Ghost
         const ghostMat=new THREE.MeshStandardMaterial({
@@ -958,7 +960,6 @@ const G=(()=>{
         scene.add(ghostMesh);
 
         // Build pieces
-        const hasVertCol=nf[0]&&nf[0].col&&nf[0].col.length>0;
         const chunks=splitFaces(nf,N);
         const radius=5.5+N*.28;
         chunks.forEach((chunk,i)=>{
