@@ -326,6 +326,13 @@ function extractGLTFMeshes(gltf,binChunk){
         const rawNor=prim.attributes.NORMAL!==undefined?getAccessorData(gltf,binChunk,prim.attributes.NORMAL):null;
         const uv=prim.attributes.TEXCOORD_0!==undefined?getAccessorData(gltf,binChunk,prim.attributes.TEXCOORD_0):null;
         const idx=prim.indices!==undefined?getAccessorData(gltf,binChunk,prim.indices):null;
+        // COLOR_0: per-vertex colour (RealityCapture / photogrammetry exports)
+        let col=null;
+        if(prim.attributes.COLOR_0!==undefined){
+          const raw=getAccessorData(gltf,binChunk,prim.attributes.COLOR_0);
+          const acc=gltf.accessors[prim.attributes.COLOR_0];
+          col={data:raw,isUint8:(acc.componentType===5121),isVec4:(acc.type==='VEC4')};
+        }
         // Apply world matrix to positions and normals
         const vCount=rawPos.length/3;
         const pos=new Float32Array(rawPos.length);
@@ -338,7 +345,7 @@ function extractGLTFMeshes(gltf,binChunk){
             nor[i*3]=tn[0];nor[i*3+1]=tn[1];nor[i*3+2]=tn[2];
           }
         }
-        results.push({pos,nor,uv,idx,texUrl:matTexUrl(prim.material)});
+        results.push({pos,nor,uv,col,idx,texUrl:matTexUrl(prim.material)});
       }
     }
     if(node.children) node.children.forEach(ci=>visitNode(ci,worldMat));
@@ -366,10 +373,9 @@ function extractGLTFMeshes(gltf,binChunk){
 }
 
 function gltfPrimsToFaces(prims){
-  // Convert GLTF primitives to our face format for splitting
   const faces=[];
   for(const prim of prims){
-    const {pos,nor,uv,idx}=prim;
+    const {pos,nor,uv,col,idx}=prim;
     const triCount=idx?idx.length/3:pos.length/9;
     for(let t=0;t<triCount;t++){
       const vi=[
@@ -380,8 +386,17 @@ function gltfPrimsToFaces(prims){
       const p=vi.map(i=>[pos[i*3],pos[i*3+1],pos[i*3+2]]);
       const n=nor?vi.map(i=>[nor[i*3],nor[i*3+1],nor[i*3+2]]):[];
       const u=uv?vi.map(i=>[uv[i*2],uv[i*2+1]]):[];
+      // Extract per-vertex colour for this triangle
+      let vc=[];
+      if(col){
+        const {data,isUint8,isVec4}=col;
+        const stride=isVec4?4:3;
+        vc=vi.map(i=>isUint8
+          ?[data[i*stride]/255,data[i*stride+1]/255,data[i*stride+2]/255]
+          :[data[i*stride],data[i*stride+1],data[i*stride+2]]);
+      }
       faces.push({
-        pos:p,nor:n,uv:u,
+        pos:p,nor:n,uv:u,col:vc,
         texUrl:prim.texUrl,
         cx:(p[0][0]+p[1][0]+p[2][0])/3,
         cy:(p[0][1]+p[1][1]+p[2][1])/3,
@@ -466,24 +481,26 @@ function splitFaces(faces,N){
 const SHRINK=0.018; // gap size — tweak for more/less visible cuts
 
 function buildGeo(fg,shrink){
-  // Compute centroid of this piece
+  const hasCol=fg[0]&&fg[0].col&&fg[0].col.length>0;
   let pcx=0,pcy=0,pcz=0,cnt=0;
   for(const f of fg){for(const v of f.pos){pcx+=v[0];pcy+=v[1];pcz+=v[2];cnt++;}}
   pcx/=cnt;pcy/=cnt;pcz/=cnt;
   const s=shrink??SHRINK;
-
-  const gv=[],gn=[],gu=[];
+  const gv=[],gn=[],gu=[],gc=[];
   for(const f of fg){
     for(let k=0;k<3;k++){
       const v=f.pos[k];
-      // Only shrink if no UVs (avoids texture swimming on photogrammetry meshes)
-      if(s>0 && !f.uv.length){
+      if(s>0&&!hasCol&&!(f.uv&&f.uv[k])){
         gv.push(v[0]+(pcx-v[0])*s,v[1]+(pcy-v[1])*s,v[2]+(pcz-v[2])*s);
       } else {
         gv.push(v[0],v[1],v[2]);
       }
-      if(f.nor[k]) gn.push(...f.nor[k]);
-      if(f.uv[k])  gu.push(...f.uv[k]);
+      if(f.nor&&f.nor[k]) gn.push(f.nor[k][0],f.nor[k][1],f.nor[k][2]);
+      if(f.uv&&f.uv[k])   gu.push(f.uv[k][0],f.uv[k][1]);
+      if(hasCol){
+        const vc=f.col&&f.col[k];
+        gc.push(vc?vc[0]:0.5, vc?vc[1]:0.5, vc?vc[2]:0.5); // always push — length must match
+      }
     }
   }
   const bg=new THREE.BufferGeometry();
@@ -491,17 +508,22 @@ function buildGeo(fg,shrink){
   if(gn.length===gv.length) bg.setAttribute('normal',new THREE.Float32BufferAttribute(gn,3));
   else bg.computeVertexNormals();
   if(gu.length===(gv.length/3)*2) bg.setAttribute('uv',new THREE.Float32BufferAttribute(gu,2));
+  if(hasCol) bg.setAttribute('color',new THREE.Float32BufferAttribute(gc,3));
   return bg;
 }
 
 function buildFullGeo(faces){
-  // Ghost — no shrink
-  const gv=[],gn=[],gu=[];
+  const hasCol=faces[0]&&faces[0].col&&faces[0].col.length>0;
+  const gv=[],gn=[],gu=[],gc=[];
   for(const f of faces){
     for(let k=0;k<3;k++){
-      gv.push(...f.pos[k]);
-      if(f.nor[k]) gn.push(...f.nor[k]);
-      if(f.uv[k])  gu.push(...f.uv[k]);
+      gv.push(f.pos[k][0],f.pos[k][1],f.pos[k][2]);
+      if(f.nor&&f.nor[k]) gn.push(f.nor[k][0],f.nor[k][1],f.nor[k][2]);
+      if(f.uv&&f.uv[k])   gu.push(f.uv[k][0],f.uv[k][1]);
+      if(hasCol){
+        const vc=f.col&&f.col[k];
+        gc.push(vc?vc[0]:0.5, vc?vc[1]:0.5, vc?vc[2]:0.5);
+      }
     }
   }
   const bg=new THREE.BufferGeometry();
@@ -509,6 +531,7 @@ function buildFullGeo(faces){
   if(gn.length===gv.length) bg.setAttribute('normal',new THREE.Float32BufferAttribute(gn,3));
   else bg.computeVertexNormals();
   if(gu.length===(gv.length/3)*2) bg.setAttribute('uv',new THREE.Float32BufferAttribute(gu,2));
+  if(hasCol) bg.setAttribute('color',new THREE.Float32BufferAttribute(gc,3));
   return bg;
 }
 
@@ -923,8 +946,9 @@ const G=(()=>{
       function finishBuild(){
         // Ghost
         const ghostMat=new THREE.MeshStandardMaterial({
-          color:texture?0xffffff:0xb0a898,
-          transparent:true,opacity:texture?.13:.07,
+          color:(texture||hasVertCol)?0xffffff:0xb0a898,
+          vertexColors:(!texture&&hasVertCol),
+          transparent:true,opacity:(texture||hasVertCol)?.13:.07,
           depthWrite:false,side:THREE.DoubleSide
         });
         if(texture) ghostMat.map=texture;
@@ -934,6 +958,7 @@ const G=(()=>{
         scene.add(ghostMesh);
 
         // Build pieces
+        const hasVertCol=nf[0]&&nf[0].col&&nf[0].col.length>0;
         const chunks=splitFaces(nf,N);
         const radius=5.5+N*.28;
         chunks.forEach((chunk,i)=>{
@@ -941,10 +966,11 @@ const G=(()=>{
           const outlineColor=OPAL[i%OPAL.length];
           let mat;
           if(texture){
-            // Textured — white base color so texture shows true
             mat=new THREE.MeshStandardMaterial({map:texture,roughness:.6,metalness:.05,side:THREE.DoubleSide});
+          } else if(hasVertCol){
+            // Vertex colour model (RealityCapture etc.)
+            mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.75,metalness:.0,side:THREE.DoubleSide});
           } else {
-            // OBJ — light neutral, color comes from outline only
             mat=new THREE.MeshStandardMaterial({color:0xddd8d0,roughness:.65,metalness:.05,side:THREE.DoubleSide});
           }
           const mesh=new THREE.Mesh(geo,mat);
@@ -1101,7 +1127,7 @@ const G=(()=>{
             const prims=loadGLB(buf);
             faces=gltfPrimsToFaces(prims);
             texUrl=prims.find(p=>p.texUrl)?.texUrl||null;
-            faces=faces.map(f=>({...f,texUrl}));
+            // Note: col (vertex colours) flows through faces directly — no extra step needed
             // Apply admin calibration rotation to fix model orientation
             if(row.calib_rx||row.calib_ry||row.calib_rz){
               const _rx=(row.calib_rx||0)*Math.PI/180,_ry=(row.calib_ry||0)*Math.PI/180,_rz=(row.calib_rz||0)*Math.PI/180;
