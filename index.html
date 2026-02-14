@@ -677,7 +677,7 @@ const G=(()=>{
   // ── SNAP ─────────────────────────────────────────────────────
   function snapRadius(piece){
     const box=new THREE.Box3().setFromObject(piece);
-    return box.getSize(new THREE.Vector3()).length()*.5;
+    return box.getSize(new THREE.Vector3()).length()*.3;
   }
   function trySnap(piece){
     if(!piece||piece.userData.isPlaced) return false;
@@ -1076,6 +1076,16 @@ const G=(()=>{
     document.getElementById('winModal').classList.add('show');
   }
 
+  // Show email capture once — only after first completed puzzle, never again
+  function maybeShowEmailCapture(){
+    const asked = localStorage.getItem('pf_email_asked');
+    const given = localStorage.getItem('pf_email_given');
+    if(!asked && !given){
+      localStorage.setItem('pf_email_asked','1');
+      setTimeout(()=>document.getElementById('emailModal').classList.add('show'), 380);
+    }
+  }
+
   function refreshAll(){refreshStats();refreshDots();refreshLvList();}
   function refreshStats(){
     const lvl=levels[curIdx];
@@ -1184,6 +1194,7 @@ const G=(()=>{
     reset(){if(curIdx>=0)buildPuzzle(curIdx);},
     nextLevel(){
       document.getElementById('winModal').classList.remove('show');
+      maybeShowEmailCapture();
       if(curIdx<levels.length-1) buildPuzzle(curIdx+1);
     },
 
@@ -1194,13 +1205,7 @@ const G=(()=>{
     },
     closeWin(){
       document.getElementById('winModal').classList.remove('show');
-      // Show email capture once — only after first completed puzzle, never again
-      const asked = localStorage.getItem('pf_email_asked');
-      const given = localStorage.getItem('pf_email_given');
-      if(!asked && !given){
-        localStorage.setItem('pf_email_asked','1');
-        setTimeout(()=>document.getElementById('emailModal').classList.add('show'), 380);
-      }
+      maybeShowEmailCapture();
     }
   };
 })();
