@@ -594,90 +594,85 @@ function resetCalib(){
 // ── Inline preview renderer ────────────────────────────────────
 let prevRenderer=null, prevScene=null, prevCamera=null, previewModel=null;
 let prevOrb={r:4,th:.5,ph:.9,on:false,lx:0,ly:0,tx:0,ty:0,tz:0};
+let prevLoopRunning=false;
 
 function initPreview(arrayBuffer){
-  // Show calib section first so container has real dimensions
-  document.getElementById('calibSection').style.display='block';
   const container=document.getElementById('previewContainer');
   const canvas=document.getElementById('previewCanvas');
 
-  function doSetup(){
-    // Use actual pixel dimensions — don't let CSS scale the canvas
-    const w=container.offsetWidth||520;
-    const h=260;
-    if(!prevRenderer){
-      prevRenderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});
-      prevRenderer.setPixelRatio(1); // keep 1:1 — retina makes it blurry in small preview
-      prevRenderer.setClearColor(0x15120e,1);
-      prevScene=new THREE.Scene();
-      prevCamera=new THREE.PerspectiveCamera(50,w/h,.05,200);
-      // Lights — brighter so model is clearly visible
-      prevScene.add(new THREE.AmbientLight(0xffffff,.75));
-      const sun=new THREE.DirectionalLight(0xfff8e8,1.4);sun.position.set(4,8,6);prevScene.add(sun);
-      const fill=new THREE.DirectionalLight(0xc0d0ff,.3);fill.position.set(-6,2,-4);prevScene.add(fill);
-      const back=new THREE.DirectionalLight(0xffe8c0,.2);back.position.set(0,-4,0);prevScene.add(back);
-      // Ground grid — clearly visible reference plane
-      const grid=new THREE.GridHelper(14,14,0x4a4030,0x2e2820);prevScene.add(grid);
-      // Set canvas pixel size explicitly
-      prevRenderer.setSize(w,h,false);
-      canvas.style.width=w+'px';canvas.style.height=h+'px';
-      // Resize observer
-      new ResizeObserver(()=>{
-        const nw=container.offsetWidth;
-        if(!nw||!prevRenderer)return;
-        prevRenderer.setSize(nw,h,false);
-        canvas.style.width=nw+'px';canvas.style.height=h+'px';
-        prevCamera.aspect=nw/h;prevCamera.updateProjectionMatrix();
-      }).observe(container);
-      // Mouse orbit — left drag orbits
-      canvas.addEventListener('mousedown',e=>{prevOrb.on=true;prevOrb.lx=e.clientX;prevOrb.ly=e.clientY;e.preventDefault();},false);
-      canvas.addEventListener('touchstart',e=>{const t=e.touches[0];prevOrb.on=true;prevOrb.lx=t.clientX;prevOrb.ly=t.clientY;},{passive:true});
-      window.addEventListener('mousemove',e=>{
-        if(!prevOrb.on)return;
-        prevOrb.th-=(e.clientX-prevOrb.lx)*.006;
-        prevOrb.ph=Math.max(.05,Math.min(1.55,prevOrb.ph-(e.clientY-prevOrb.ly)*.006));
-        prevOrb.lx=e.clientX;prevOrb.ly=e.clientY;updatePrevOrb();
+  function loadModel(){
+    // Dispose previous model properly
+    if(previewModel){
+      previewModel.traverse(c=>{
+        if(c.isMesh){c.geometry.dispose();if(c.material)c.material.dispose();}
       });
-      window.addEventListener('touchmove',e=>{
-        if(!prevOrb.on)return;const t=e.touches[0];
-        prevOrb.th-=(t.clientX-prevOrb.lx)*.006;
-        prevOrb.ph=Math.max(.05,Math.min(1.55,prevOrb.ph-(t.clientY-prevOrb.ly)*.006));
-        prevOrb.lx=t.clientX;prevOrb.ly=t.clientY;updatePrevOrb();
-      },{passive:true});
-      window.addEventListener('mouseup',()=>prevOrb.on=false);
-      window.addEventListener('touchend',()=>prevOrb.on=false);
-      canvas.addEventListener('wheel',e=>{prevOrb.r=Math.max(.5,Math.min(30,prevOrb.r*(1+e.deltaY*.001)));updatePrevOrb();e.preventDefault();},{passive:false});
-      // Render loop
-      (function loop(){requestAnimationFrame(loop);if(prevRenderer&&prevScene&&prevCamera)prevRenderer.render(prevScene,prevCamera);})();
+      prevScene.remove(previewModel);
+      previewModel=null;
     }
-
-    // Remove old model
-    if(previewModel){prevScene.remove(previewModel);previewModel=null;}
-
-    // Parse + show model
     try{
       const prims=loadGLBSimple(arrayBuffer);
       const group=primsToPreviewMesh(prims);
-      prevScene.add(group);previewModel=group;
+      prevScene.add(group);
+      previewModel=group;
       applyCalib();
-      // Auto-fit camera to model
+      // Fit camera — compute box AFTER adding to scene
       const box=new THREE.Box3().setFromObject(group);
-      const sz=box.getSize(new THREE.Vector3()).length();
+      const sz=box.getSize(new THREE.Vector3()).length()||2;
       const ctr=box.getCenter(new THREE.Vector3());
-      // Sit model on grid: shift centre so bottom is at y=0
-      const minY=box.min.y;
-      group.position.y=-minY; // rest on grid
-      // Apply saved offsetY (move up/down relative to grid)
       const oy=selIdx>=0?(levels[selIdx].offsetY||0):0;
       group.position.y=oy;
-      prevOrb.tx=ctr.x; prevOrb.ty=(ctr.y-minY)+oy; prevOrb.tz=ctr.z;
-      prevOrb.r=sz*1.8; prevOrb.ph=.75; prevOrb.th=.5;
+      prevOrb.tx=ctr.x; prevOrb.ty=ctr.y+oy; prevOrb.tz=ctr.z;
+      prevOrb.r=sz*2.0; prevOrb.ph=.8; prevOrb.th=.5;
       updatePrevOrb();
-    }catch(err){console.error('preview error',err);}
+    }catch(err){console.error('preview parse error',err);}
   }
 
-  // Wait two frames so container is laid out and has real offsetWidth
-  requestAnimationFrame(()=>requestAnimationFrame(doSetup));
+  function setupRenderer(){
+    const w=container.offsetWidth;
+    const h=260;
+    if(!w){setTimeout(setupRenderer,150);return;} // wait for real layout
+    if(!prevRenderer){
+      // First time — create renderer, scene, camera, lights, events
+      prevRenderer=new THREE.WebGLRenderer({canvas,antialias:true});
+      prevRenderer.setClearColor(0x15120e,1);
+      prevRenderer.setPixelRatio(window.devicePixelRatio);
+      prevRenderer.setSize(w,h);  // true = also set CSS
+      prevScene=new THREE.Scene();
+      prevCamera=new THREE.PerspectiveCamera(50,w/h,0.05,500);
+      prevScene.add(new THREE.AmbientLight(0xffffff,0.9));
+      const sun=new THREE.DirectionalLight(0xffffff,1.2);
+      sun.position.set(5,10,7);prevScene.add(sun);
+      const fill=new THREE.DirectionalLight(0x8090ff,0.3);
+      fill.position.set(-5,2,-5);prevScene.add(fill);
+      prevScene.add(new THREE.GridHelper(20,20,0x3a3428,0x252018));
+      // Resize
+      new ResizeObserver(()=>{
+        const nw=container.offsetWidth;
+        if(!nw||!prevRenderer)return;
+        prevRenderer.setSize(nw,h);
+        prevCamera.aspect=nw/h;prevCamera.updateProjectionMatrix();
+      }).observe(container);
+      // Orbit controls
+      canvas.addEventListener('mousedown',e=>{prevOrb.on=true;prevOrb.lx=e.clientX;prevOrb.ly=e.clientY;e.preventDefault();},false);
+      canvas.addEventListener('touchstart',e=>{const t=e.touches[0];prevOrb.on=true;prevOrb.lx=t.clientX;prevOrb.ly=t.clientY;},{passive:true});
+      window.addEventListener('mousemove',e=>{if(!prevOrb.on)return;prevOrb.th-=(e.clientX-prevOrb.lx)*.006;prevOrb.ph=Math.max(.05,Math.min(1.55,prevOrb.ph-(e.clientY-prevOrb.ly)*.006));prevOrb.lx=e.clientX;prevOrb.ly=e.clientY;updatePrevOrb();});
+      window.addEventListener('touchmove',e=>{if(!prevOrb.on)return;const t=e.touches[0];prevOrb.th-=(t.clientX-prevOrb.lx)*.006;prevOrb.ph=Math.max(.05,Math.min(1.55,prevOrb.ph-(t.clientY-prevOrb.ly)*.006));prevOrb.lx=t.clientX;prevOrb.ly=t.clientY;updatePrevOrb();},{passive:true});
+      window.addEventListener('mouseup',()=>prevOrb.on=false);
+      window.addEventListener('touchend',()=>prevOrb.on=false);
+      canvas.addEventListener('wheel',e=>{prevOrb.r=Math.max(.5,Math.min(40,prevOrb.r*(1+e.deltaY*.001)));updatePrevOrb();e.preventDefault();},{passive:false});
+      if(!prevLoopRunning){
+        prevLoopRunning=true;
+        (function loop(){requestAnimationFrame(loop);if(prevRenderer&&prevScene&&prevCamera)prevRenderer.render(prevScene,prevCamera);})();
+      }
+    } else {
+      prevRenderer.setSize(w,h);
+      prevCamera.aspect=w/h;prevCamera.updateProjectionMatrix();
+    }
+    loadModel();
+  }
+
+  // Give the DOM time to apply display:block and measure the container
+  setTimeout(setupRenderer, 120);
 }
 
 function applyCalib(){
@@ -744,12 +739,22 @@ function loadGLBSimple(buf){
       for(const p of g.meshes[n.mesh].primitives){
         const rp=getAcc(p.attributes.POSITION),rn=p.attributes.NORMAL!=null?getAcc(p.attributes.NORMAL):null;
         const uv=p.attributes.TEXCOORD_0!=null?getAcc(p.attributes.TEXCOORD_0):null,ix=p.indices!=null?getAcc(p.indices):null;
+        // COLOR_0: per-vertex colour (RealityCapture / photogrammetry exports)
+        const rc0=p.attributes.COLOR_0!=null?getAcc(p.attributes.COLOR_0):null;
         const vc=rp.length/3,pos=new Float32Array(rp.length),nor=rn?new Float32Array(rn.length):null;
         for(let i=0;i<vc;i++){
           const pp=tp(wm,[rp[i*3],rp[i*3+1],rp[i*3+2]]);pos[i*3]=pp[0];pos[i*3+1]=pp[1];pos[i*3+2]=pp[2];
           if(rn){const nn=tn(wm,[rn[i*3],rn[i*3+1],rn[i*3+2]]);nor[i*3]=nn[0];nor[i*3+1]=nn[1];nor[i*3+2]=nn[2];}
         }
-        res.push({pos,nor,uv,idx:ix,texUrl:texUrl(p.material)});
+        // Determine colour type: VEC4 uint8 (0-255) or VEC4/VEC3 float (0-1)
+        let col=null;
+        if(rc0){
+          const acc=g.accessors[p.attributes.COLOR_0];
+          const isUint8=(acc.componentType===5121);
+          const isVec4=(acc.type==='VEC4');
+          col={data:rc0,isUint8,isVec4};
+        }
+        res.push({pos,nor,uv,col,idx:ix,texUrl:texUrl(p.material)});
       }
     }
     if(n.children)n.children.forEach(ci=>visit(ci,wm));
@@ -759,52 +764,85 @@ function loadGLBSimple(buf){
   roots.forEach(i=>visit(i,I()));
   // Fallback: if node walk found nothing, iterate meshes directly
   if(!res.length&&g.meshes)for(const m of g.meshes)for(const p of m.primitives){
-    res.push({pos:getAcc(p.attributes.POSITION),nor:p.attributes.NORMAL!=null?getAcc(p.attributes.NORMAL):null,uv:p.attributes.TEXCOORD_0!=null?getAcc(p.attributes.TEXCOORD_0):null,idx:p.indices!=null?getAcc(p.indices):null,texUrl:texUrl(p.material)});
+    const rc0=p.attributes.COLOR_0!=null?getAcc(p.attributes.COLOR_0):null;
+    let col=null;
+    if(rc0){const acc=g.accessors[p.attributes.COLOR_0];col={data:rc0,isUint8:(acc.componentType===5121),isVec4:(acc.type==='VEC4')};}
+    res.push({pos:getAcc(p.attributes.POSITION),nor:p.attributes.NORMAL!=null?getAcc(p.attributes.NORMAL):null,uv:p.attributes.TEXCOORD_0!=null?getAcc(p.attributes.TEXCOORD_0):null,col,idx:p.indices!=null?getAcc(p.indices):null,texUrl:texUrl(p.material)});
   }
   return res;
 }
 function primsToPreviewMesh(prims){
   const grp=new THREE.Group();
-  // Compute global bounding box for centering
-  let mx=-Infinity,my=-Infinity,mz=-Infinity,nx=Infinity,ny=Infinity,nz=Infinity;
-  prims.forEach(p=>{for(let i=0;i<p.pos.length;i+=3){nx=Math.min(nx,p.pos[i]);mx=Math.max(mx,p.pos[i]);ny=Math.min(ny,p.pos[i+1]);my=Math.max(my,p.pos[i+1]);nz=Math.min(nz,p.pos[i+2]);mz=Math.max(mz,p.pos[i+2]);}});
-  const cx=(mx+nx)/2,cy=(my+ny)/2,cz=(mz+nz)/2;
-  const sc=2.5/Math.max(mx-nx,my-ny,mz-nz,.001); // scale to ~2.5 units
-  prims.forEach(({pos,nor,uv,idx,texUrl})=>{
-    const gv=[],gn=[],gu=[];
-    const push=i=>{
-      gv.push((pos[i*3]-cx)*sc,(pos[i*3+1]-cy)*sc,(pos[i*3+2]-cz)*sc);
-      if(nor)gn.push(nor[i*3],nor[i*3+1],nor[i*3+2]);
-      if(uv)gu.push(uv[i*2],uv[i*2+1]);
-    };
-    if(idx){for(let i=0;i<idx.length;i++)push(idx[i]);}
-    else{for(let i=0;i<pos.length/3;i++)push(i);}
+  // Global centre + scale so model fits in ~2.5 unit box
+  let mnx=Infinity,mny=Infinity,mnz=Infinity,mxx=-Infinity,mxy=-Infinity,mxz=-Infinity;
+  prims.forEach(({pos})=>{for(let i=0;i<pos.length;i+=3){mnx=Math.min(mnx,pos[i]);mxx=Math.max(mxx,pos[i]);mny=Math.min(mny,pos[i+1]);mxy=Math.max(mxy,pos[i+1]);mnz=Math.min(mnz,pos[i+2]);mxz=Math.max(mxz,pos[i+2]);}});
+  const cx=(mnx+mxx)/2,cy=(mny+mxy)/2,cz=(mnz+mxz)/2;
+  const sc=2.5/Math.max(mxx-mnx,mxy-mny,mxz-mnz,0.001);
+
+  prims.forEach(({pos,nor,uv,col,idx,texUrl})=>{
+    // Build flat arrays — expand indexed geometry
+    const nTri = idx ? idx.length/3 : pos.length/9;
+    const verts = idx ? idx.length : pos.length/3;
+    const gv=new Float32Array(verts*3);
+    const gn=nor ? new Float32Array(verts*3) : null;
+    const gu=uv  ? new Float32Array(verts*2) : null;
+    const gc=col ? new Float32Array(verts*3) : null;
+
+    const stride_col = col ? (col.isVec4?4:3) : 0;
+
+    for(let vi=0;vi<verts;vi++){
+      const si = idx ? idx[vi] : vi;  // source index
+      // position — centred + scaled
+      gv[vi*3]   = (pos[si*3]  -cx)*sc;
+      gv[vi*3+1] = (pos[si*3+1]-cy)*sc;
+      gv[vi*3+2] = (pos[si*3+2]-cz)*sc;
+      // normal
+      if(gn){ gn[vi*3]=nor[si*3]; gn[vi*3+1]=nor[si*3+1]; gn[vi*3+2]=nor[si*3+2]; }
+      // uv
+      if(gu){ gu[vi*2]=uv[si*2]; gu[vi*2+1]=uv[si*2+1]; }
+      // colour — uint8 normalized or float
+      if(gc){
+        if(col.isUint8){
+          gc[vi*3]   = col.data[si*stride_col]  /255;
+          gc[vi*3+1] = col.data[si*stride_col+1]/255;
+          gc[vi*3+2] = col.data[si*stride_col+2]/255;
+        } else {
+          gc[vi*3]   = col.data[si*stride_col];
+          gc[vi*3+1] = col.data[si*stride_col+1];
+          gc[vi*3+2] = col.data[si*stride_col+2];
+        }
+      }
+    }
+
     const geo=new THREE.BufferGeometry();
-    geo.setAttribute('position',new THREE.Float32BufferAttribute(gv,3));
-    if(gn.length)geo.setAttribute('normal',new THREE.Float32BufferAttribute(gn,3));
-    else geo.computeVertexNormals();
-    if(gu.length===(gv.length/3)*2)geo.setAttribute('uv',new THREE.Float32BufferAttribute(gu,2));
-    // Build material — textured if we have a blob URL, plain clay if not
-    const hasUV = gu.length===(gv.length/3)*2;
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(gv,3));
+    if(gn) geo.setAttribute('normal', new THREE.Float32BufferAttribute(gn,3));
+    else   geo.computeVertexNormals();
+    if(gu && gu.length===verts*2) geo.setAttribute('uv', new THREE.Float32BufferAttribute(gu,2));
+    if(gc) geo.setAttribute('color', new THREE.Float32BufferAttribute(gc,3));
+
+    const hasUV  = gu && gu.length===verts*2;
+    const hasCol = !!gc;
+
     const mat=new THREE.MeshStandardMaterial({
-      roughness:.65, metalness:.04,
-      side:THREE.DoubleSide,
-      color: (texUrl&&hasUV) ? 0xffffff : 0xc8b89a
+      roughness: 0.8, metalness: 0.0,
+      side: THREE.DoubleSide,
+      vertexColors: hasCol,
+      color: (hasCol || (texUrl && hasUV)) ? 0xffffff : 0xc8b49a
     });
-    if(texUrl&&hasUV){
-      // texUrl is {bytes:Uint8Array, mime:string} — decode directly, no fetch needed
+
+    if(texUrl && hasUV && !hasCol){
       const blob=new Blob([texUrl.bytes],{type:texUrl.mime});
       createImageBitmap(blob).then(bmp=>{
         const cvs=document.createElement('canvas');
         cvs.width=bmp.width; cvs.height=bmp.height;
         const ctx=cvs.getContext('2d');
-        // Flip Y: glTF origin is bottom-left, canvas origin is top-left
         ctx.translate(0,bmp.height); ctx.scale(1,-1);
         ctx.drawImage(bmp,0,0);
         const tex=new THREE.CanvasTexture(cvs);
-        tex.flipY=false; // already flipped above
+        tex.flipY=false;
         mat.map=tex; mat.needsUpdate=true;
-      }).catch(e=>console.warn('Texture decode failed',e));
+      }).catch(e=>console.warn('Texture decode:',e));
     }
     grp.add(new THREE.Mesh(geo,mat));
   });
