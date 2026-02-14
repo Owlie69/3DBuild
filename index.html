@@ -145,7 +145,7 @@ canvas{width:100%;height:100%;display:block}
     <div class="psec">
       <div class="plabel">Actions</div>
       <button class="btn" onclick="G.reset()">Reset</button>
-      <button class="btn red" onclick="G.removeLvl()">Remove Model</button>
+
     </div>
     <div class="psec">
       <div class="plabel">Controls</div>
@@ -248,15 +248,18 @@ function getAccessorData(gltf,binChunk,accessorIdx){
 function extractGLTFMeshes(gltf,binChunk){
   const results=[];
 
-  // ── Images / textures ──────────────────────────────────────
-  const images=[];
+  // ── Images / textures — store raw bytes, avoid blob URL fetch issues ──
+  const imageBytes=[];  // array of {bytes:Uint8Array, mime:string} or null
   if(gltf.images){
     for(const img of gltf.images){
       if(img.bufferView!==undefined){
         const bv=gltf.bufferViews[img.bufferView];
-        const bytes=new Uint8Array(binChunk,bv.byteOffset||0,bv.byteLength);
-        images.push(URL.createObjectURL(new Blob([bytes],{type:img.mimeType||'image/jpeg'})));
-      } else images.push(null);
+        // Copy bytes out so they're not tied to the ArrayBuffer view
+        const src=new Uint8Array(binChunk,bv.byteOffset||0,bv.byteLength);
+        const copy=new Uint8Array(src.length);
+        copy.set(src);
+        imageBytes.push({bytes:copy,mime:img.mimeType||'image/jpeg'});
+      } else imageBytes.push(null);
     }
   }
   function matTexUrl(matIdx){
@@ -264,7 +267,8 @@ function extractGLTFMeshes(gltf,binChunk){
     const mat=gltf.materials[matIdx];
     const texIdx=mat?.pbrMetallicRoughness?.baseColorTexture?.index;
     if(texIdx===undefined) return null;
-    return images[gltf.textures[texIdx].source]||null;
+    const src=imageBytes[gltf.textures[texIdx]?.source];
+    return src||null;  // returns {bytes, mime} object or null
   }
 
   // ── 4x4 matrix math (column-major, like glTF/WebGL) ───────
@@ -926,6 +930,7 @@ const G=(()=>{
         if(texture) ghostMat.map=texture;
         ghostMesh=new THREE.Mesh(buildFullGeo(nf),ghostMat);
         ghostMesh.userData.isGhost=true;
+        ghostMesh.position.y=lvl.offsetY||0;
         scene.add(ghostMesh);
 
         // Build pieces
@@ -944,7 +949,8 @@ const G=(()=>{
           }
           const mesh=new THREE.Mesh(geo,mat);
           mesh.castShadow=true;
-          mesh.userData={correctPos:new THREE.Vector3(0,0,0),isPlaced:false,pieceIdx:i};
+          const oy=lvl.offsetY||0;
+          mesh.userData={correctPos:new THREE.Vector3(0,oy,0),isPlaced:false,pieceIdx:i};
           const ang=(i/chunks.length)*Math.PI*2;
           const r2=radius+(i%2===0?0:1.8);
           mesh.position.set(Math.cos(ang)*r2,0.1,Math.sin(ang)*r2);
@@ -964,16 +970,21 @@ const G=(()=>{
       }
 
       if(tex){
-        // Use Image() directly — more reliable with blob URLs than TextureLoader
-        const img=new Image();
-        img.onload=()=>{
-          texture=new THREE.Texture(img);
-          texture.flipY=false; // glTF spec
+        // tex is {bytes:Uint8Array, mime:string} — no fetch needed, direct decode
+        const blob=new Blob([tex.bytes],{type:tex.mime});
+        createImageBitmap(blob).then(bmp=>{
+          const cvs=document.createElement('canvas');
+          cvs.width=bmp.width; cvs.height=bmp.height;
+          const ctx=cvs.getContext('2d');
+          // Flip Y manually to match glTF spec (V=0 at bottom, canvas V=0 at top)
+          ctx.translate(0,bmp.height);
+          ctx.scale(1,-1);
+          ctx.drawImage(bmp,0,0);
+          texture=new THREE.CanvasTexture(cvs);
+          texture.flipY=false; // already flipped in canvas
           texture.needsUpdate=true;
           finishBuild();
-        };
-        img.onerror=()=>{texture=null;finishBuild();};
-        img.src=tex;
+        }).catch(()=>{texture=null;finishBuild();});
       } else {
         finishBuild();
       }
@@ -998,9 +1009,9 @@ const G=(()=>{
     levels[curIdx].completed=true;refreshLvList();
 
     // ── Star rating ───────────────────────────────────────────
-    // 3 stars: moves <= pieces*2, 2 stars: moves <= pieces*3, 1 star: rest
+    // 3 stars: moves <= pieces*1.5, 2 stars: moves <= pieces*3, 1 star: rest
     const N=levels[curIdx].numPieces;
-    const stars = moves<=N*2 ? 3 : moves<=N*3 ? 2 : 1;
+    const stars = moves<=Math.ceil(N*1.5) ? 3 : moves<=N*3 ? 2 : 1;
     const labels=['','★','★★','★★★'];
     document.getElementById('wStarLabel').textContent=labels[stars];
     // Animate stars with delay
@@ -1117,7 +1128,8 @@ const G=(()=>{
           levels.push({
             name:row.name,faces,texUrl,skyUrl,
             numPieces:row.pieces||15,piecesPlaced:0,completed:false,
-            modelUrl:null  // no external URL, model is embedded
+            offsetY:row.offset_y||0,
+            modelUrl:null
           });
           refreshLvList();
         }catch(e){console.error('Level load error:',row.name,e);}
