@@ -65,20 +65,60 @@ canvas{width:100%;height:100%;display:block}
 .mst{flex:1;text-align:center}
 .mst .v{font-family:'Cormorant Garamond',serif;font-size:26px;font-weight:300;color:var(--snap);display:block;margin-bottom:2px}
 .mst .l{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
-.mbtns{display:flex;gap:8px}.mbtns .btn{flex:1}
+.mbtns{display:flex;gap:8px;flex-wrap:wrap}.mbtns .btn{flex:1;min-width:100px}
+/* Stars */
+.stars{display:flex;justify-content:center;gap:10px;padding:8px 0}
+.star{font-size:36px;transition:transform .3s,opacity .3s;opacity:.15;transform:scale(.7)}
+.star.on{opacity:1;transform:scale(1);animation:starPop .35s ease forwards}
+@keyframes starPop{0%{transform:scale(.5)}60%{transform:scale(1.25)}100%{transform:scale(1)}}
+/* Email capture modal */
+#emailModal{position:fixed;inset:0;background:rgba(245,243,239,.92);backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center;z-index:200;padding:16px}
+#emailModal.show{display:flex}
+.ecard{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:40px 36px;max-width:400px;width:100%;box-shadow:0 2px 24px rgba(26,24,20,.08);animation:slideUp .45s cubic-bezier(.22,1,.36,1) forwards}
+@keyframes slideUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+.ecard h3{font-family:'Cormorant Garamond',serif;font-size:24px;font-weight:400;letter-spacing:.02em;margin-bottom:8px}
+.ecard p{font-size:12px;color:var(--muted);line-height:1.75;margin-bottom:22px}
+.einput{display:flex;gap:0;border:1px solid var(--border);border-radius:3px;overflow:hidden;transition:border-color .2s}
+.einput:focus-within{border-color:var(--accent)}
+.einput input{flex:1;border:none;padding:11px 14px;font-family:'Jost',sans-serif;font-size:13px;background:var(--bg);outline:none;color:var(--text)}
+.einput input::placeholder{color:var(--muted)}
+.einput button{background:var(--text);color:var(--surface);border:none;padding:11px 18px;font-family:'Jost',sans-serif;font-size:10px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;transition:background .2s;white-space:nowrap}
+.einput button:hover{background:var(--accent)}
+.einput button:disabled{opacity:.6;cursor:default}
+.eskip{background:none;border:none;font-family:'Jost',sans-serif;font-size:10px;color:var(--muted);letter-spacing:.08em;cursor:pointer;margin-top:14px;display:block;width:100%;text-align:center;padding:4px;transition:color .2s}
+.eskip:hover{color:var(--text)}
+.ethanks{display:none;text-align:center;padding:12px 0}
+.ethanks .ei{font-size:28px;margin-bottom:10px}
+.ethanks p{font-size:12px;color:var(--muted);line-height:1.7}
+
+/* Mobile */
+@media(max-width:640px){
+  #bar{padding:0 12px;gap:10px;height:46px}
+  .logo{font-size:15px}
+  .sep{display:none}
+  .bstat{font-size:10px}
+  #wrap{flex-direction:column}
+  #panel{width:100%;height:auto;flex-direction:row;flex-wrap:wrap;padding:10px 12px;gap:10px;border-left:none;border-top:1px solid var(--border);overflow-y:visible;flex-shrink:0}
+  #panel .psec{min-width:120px}
+  .plabel{padding-bottom:6px;margin-bottom:0}
+  #cv{flex:1;min-height:0}
+  .modal{padding:24px;gap:14px}
+  .modal h2{font-size:20px}
+  .mstats{padding:12px}
+  .mst .v{font-size:22px}
+  .star{font-size:30px;gap:6px}
+}
 </style>
 </head>
 <body>
 <div id="bar">
   <div class="logo">Puzzle <em>&amp;</em> Form</div>
   <div class="sep"></div>
-  <div id="barLevel">No model loaded</div>
-  <div class="sep"></div>
+  <div id="barLevel">Loading…</div>
+  <div class="spacer"></div>
   <div class="bstat">Pieces&nbsp;<b id="bPieces">0 / 0</b></div>
   <div class="bstat">Time&nbsp;<b id="bTime">0:00</b></div>
   <div class="bstat">Moves&nbsp;<b id="bMoves">0</b></div>
-  <div class="spacer"></div>
-
 </div>
 <div id="wrap">
   <div id="cv">
@@ -123,10 +163,15 @@ canvas{width:100%;height:100%;display:block}
 <div class="mbg" id="winModal">
   <div class="modal">
     <h2>Complete.</h2>
-    <p>You've reassembled the model.</p>
+    <div class="stars">
+      <span class="star" id="star1">★</span>
+      <span class="star" id="star2">★</span>
+      <span class="star" id="star3">★</span>
+    </div>
     <div class="mstats">
       <div class="mst"><span class="v" id="wTime">—</span><span class="l">Time</span></div>
       <div class="mst"><span class="v" id="wMoves">—</span><span class="l">Moves</span></div>
+      <div class="mst"><span class="v" id="wStarLabel">—</span><span class="l">Rating</span></div>
     </div>
     <div id="winUnlock" style="display:none;padding:14px 0 2px;border-top:1px solid var(--border);margin-top:4px">
       <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Unlocked</div>
@@ -135,10 +180,40 @@ canvas{width:100%;height:100%;display:block}
         <div style="flex:1"><div style="font-size:13px;font-weight:400" id="winModelName">—</div><div style="font-size:10px;color:var(--muted)">Available in the builder</div></div>
       </div>
     </div>
-    <div class="mbtns" style="margin-top:0">
-      <button class="btn" onclick="G.closeWin();G.reset()">Play Again</button>
+    <div class="mbtns">
+      <button class="btn" onclick="G.closeWin();G.reset()" style="border-color:var(--snap);color:var(--snap)">↺ Retry</button>
+      <button class="btn" id="nextBtn" onclick="G.nextLevel()" style="background:var(--accent);border-color:var(--accent);color:#fff">Next Level →</button>
+    </div>
+    <div class="mbtns" style="margin-top:-10px">
       <button class="btn" id="buildBtn" style="border-color:var(--accent);color:var(--accent);display:none" onclick="window.location.href='build.html'">Build in 3D →</button>
-      <button class="btn" onclick="G.closeWin()" id="doneBtn">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── EMAIL CAPTURE ── -->
+<div id="emailModal">
+  <div class="ecard">
+    <!-- Default state: email form -->
+    <div id="emailForm">
+      <div style="font-size:22px;margin-bottom:16px;opacity:.7">◇</div>
+      <h3>Stay in the loop</h3>
+      <p>
+        We're building more puzzles, new models, and features for creators.<br>
+        Leave your email and we'll let you know when something new drops — no spam, ever.
+      </p>
+      <div class="einput">
+        <input type="email" id="emailInput" placeholder="your@email.com" autocomplete="email">
+        <button id="emailSubmit" onclick="submitEmail()">Notify me</button>
+      </div>
+      <p id="emailErr" style="font-size:10px;color:var(--danger);margin-top:8px;display:none">Please enter a valid email.</p>
+      <button class="eskip" onclick="closeEmailModal()">No thanks, maybe later</button>
+    </div>
+    <!-- Success state -->
+    <div class="ethanks" id="emailThanks">
+      <div class="ei">✦</div>
+      <p style="font-size:15px;font-family:'Cormorant Garamond',serif;font-weight:400;margin-bottom:8px">You're on the list.</p>
+      <p>We'll only reach out when there's something worth sharing.<br>Thank you for playing.</p>
+      <button class="eskip" onclick="closeEmailModal()" style="margin-top:18px">Back to puzzles</button>
     </div>
   </div>
 </div>
@@ -695,6 +770,101 @@ const G=(()=>{
     orb.update();e.preventDefault();
   },{passive:false});
 
+  // ── TOUCH EVENTS (mobile) ─────────────────────────────────────
+  let touch1=null; // primary drag touch
+  let touchOrb=null; // two-finger orbit start
+  let pinchDist0=0; // two-finger pinch start distance
+
+  function touchNDC(t){
+    const r=canvas.getBoundingClientRect();
+    mn.set(((t.clientX-r.left)/r.width)*2-1,-((t.clientY-r.top)/r.height)*2+1);
+  }
+
+  canvas.addEventListener('touchstart',e=>{
+    e.preventDefault();
+    if(e.touches.length===2){
+      // Two-finger: orbit + pinch zoom
+      const a=e.touches[0],b=e.touches[1];
+      touchOrb={lx:(a.clientX+b.clientX)/2,ly:(a.clientY+b.clientY)/2};
+      pinchDist0=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY);
+      dragging=null;dragArrowActive=null;
+      return;
+    }
+    const t=e.touches[0];
+    touch1={id:t.identifier,sx:t.clientX,sy:t.clientY,moved:false};
+    touchNDC(t);rc.setFromCamera(mn,camera);
+    // Check arrows first
+    if(arrowGroup.visible){
+      const gm=[];arrowGroup.traverse(c=>{if(c.isMesh)gm.push(c);});
+      const gh=rc.intersectObjects(gm,true);
+      if(gh.length){
+        const dir=gh[0].object.userData.arrowDir??gh[0].object.parent?.userData.arrowDir;
+        if(dir!==undefined){dragArrowActive=dir>0?'up':'down';dragArrowStartY=dragging?dragging.position.y:0;dragArrowStartMY=t.clientY;return;}
+      }
+    }
+    // Check pieces
+    const meshes=[];
+    pieces.forEach(p=>{if(!p.userData.isPlaced)p.traverse(c=>{if(c.isMesh&&!c.userData.isOutline)meshes.push(c);});});
+    const hits=rc.intersectObjects(meshes,false);
+    if(!hits.length){dragging=null;attachGizmo(null);return;}
+    let root=hits[0].object;
+    while(root.parent&&!pieces.includes(root))root=root.parent;
+    if(!pieces.includes(root)||root.userData.isPlaced){dragging=null;attachGizmo(null);return;}
+    dragging=root;
+    hPlane.constant=-root.position.y;
+    const pt=new THREE.Vector3();
+    rc.ray.intersectPlane(hPlane,pt);
+    dragOffset.copy(root.position).sub(pt);
+    attachGizmo(root);
+  },{passive:false});
+
+  canvas.addEventListener('touchmove',e=>{
+    e.preventDefault();
+    if(e.touches.length===2&&touchOrb){
+      const a=e.touches[0],b=e.touches[1];
+      const mx=(a.clientX+b.clientX)/2,my=(a.clientY+b.clientY)/2;
+      orb.theta-=(mx-touchOrb.lx)*.005;
+      orb.phi=Math.max(.1,Math.min(Math.PI-.1,orb.phi-(my-touchOrb.ly)*.005));
+      touchOrb.lx=mx;touchOrb.ly=my;
+      // Pinch zoom
+      const d=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY);
+      orb.r=Math.max(1,Math.min(60,orb.r*(pinchDist0/d)));
+      pinchDist0=d;
+      orb.update();return;
+    }
+    if(!e.touches.length) return;
+    const t=e.touches[0];
+    if(touch1) touch1.moved=true;
+    // Y-arrow drag
+    if(dragArrowActive&&dragging){
+      const dy=(dragArrowStartMY-t.clientY)*0.015;
+      dragging.position.y=Math.max(-2.0,dragArrowStartY+dy);
+      arrowGroup.position.copy(dragging.position);
+      liveProximity(dragging);moves++;refreshStats();return;
+    }
+    if(!dragging) return;
+    touchNDC(t);rc.setFromCamera(mn,camera);
+    const pt=new THREE.Vector3();
+    if(rc.ray.intersectPlane(hPlane,pt)){
+      const np=pt.clone().add(dragOffset);
+      np.y=dragging.position.y;
+      dragging.position.copy(np);
+      arrowGroup.position.copy(np);
+      liveProximity(dragging);moves++;refreshStats();
+    }
+  },{passive:false});
+
+  canvas.addEventListener('touchend',e=>{
+    e.preventDefault();
+    touchOrb=null;
+    if(dragArrowActive){dragArrowActive=null;return;}
+    if(dragging){
+      if(trySnap(dragging)){dragging=null;attachGizmo(null);}
+      else setOutline(dragging,0);
+    }
+    touch1=null;
+  },{passive:false});
+
   canvas.addEventListener('mousemove',e=>{
     if(dragging||orb.active||dragArrowActive) return;
     toNDC(e);rc.setFromCamera(mn,camera);
@@ -811,23 +981,40 @@ const G=(()=>{
     document.getElementById('wMoves').textContent=moves;
     levels[curIdx].completed=true;refreshLvList();
 
+    // ── Star rating ───────────────────────────────────────────
+    // 3 stars: moves <= pieces*2, 2 stars: moves <= pieces*3, 1 star: rest
+    const N=levels[curIdx].numPieces;
+    const stars = moves<=N*2 ? 3 : moves<=N*3 ? 2 : 1;
+    const labels=['','★','★★','★★★'];
+    document.getElementById('wStarLabel').textContent=labels[stars];
+    // Animate stars with delay
+    for(let i=1;i<=3;i++){
+      const el=document.getElementById('star'+i);
+      el.classList.remove('on');
+      if(i<=stars) setTimeout(()=>el.classList.add('on'), i*180);
+    }
+
+    // ── Next level button ─────────────────────────────────────
+    const hasNext = curIdx < levels.length-1;
+    document.getElementById('nextBtn').style.opacity = hasNext ? '1' : '.4';
+    document.getElementById('nextBtn').disabled = !hasNext;
+
     // ── Unlock model for the builder ──────────────────────────
     const lvl=levels[curIdx];
-    if(lvl.modelUrl){
-      // Save to collection in localStorage
+    document.getElementById('winUnlock').style.display='none';
+    document.getElementById('buildBtn').style.display='none';
+    if(lvl.texUrl){
       const key='puzzle_collection';
       let col=[];
-      try{col=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
-      const alreadyHas=col.some(m=>m.url===lvl.modelUrl);
-      if(!alreadyHas){
-        col.push({name:lvl.name,url:lvl.modelUrl,texUrl:lvl.texUrl||null,unlockedAt:Date.now()});
+      try{col=JSON.parse(localStorage.getItem(key)||'[]');}catch(ex){}
+      const id=lvl.name+':'+curIdx;
+      if(!col.some(m=>m.id===id)){
+        col.push({id,name:lvl.name,texUrl:lvl.texUrl,unlockedAt:Date.now()});
         localStorage.setItem(key,JSON.stringify(col));
       }
-      // Show unlock UI
       document.getElementById('winUnlock').style.display='block';
       document.getElementById('winModelName').textContent=lvl.name;
       document.getElementById('buildBtn').style.display='block';
-      document.getElementById('doneBtn').style.display='none';
     }
     document.getElementById('winModal').classList.add('show');
   }
@@ -878,7 +1065,9 @@ const G=(()=>{
           let faces=[],texUrl=null;
           if(row.model_data){
             // model_data is base64-encoded GLB
-            const bin=atob(row.model_data);
+            // Decode base64 safely (handle padding, whitespace)
+            const _b64=row.model_data.replace(/\s/g,'');
+            const bin=atob(_b64);
             const buf=new ArrayBuffer(bin.length);
             const u8=new Uint8Array(buf);
             for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
@@ -888,18 +1077,16 @@ const G=(()=>{
             faces=faces.map(f=>({...f,texUrl}));
             // Apply admin calibration rotation to fix model orientation
             if(row.calib_rx||row.calib_ry||row.calib_rz){
-              const rx=(row.calib_rx||0)*Math.PI/180;
-              const ry=(row.calib_ry||0)*Math.PI/180;
-              const rz=(row.calib_rz||0)*Math.PI/180;
-              const cX=Math.cos(rx),sX=Math.sin(rx),cY=Math.cos(ry),sY=Math.sin(ry),cZ=Math.cos(rz),sZ=Math.sin(rz);
-              function rotV(v){
-                let x=v[0]*cZ-v[1]*sZ,y=v[0]*sZ+v[1]*cZ,z=v[2];
-                let x2=x*cY+z*sY,z2=-x*sY+z*cY;x=x2;z=z2;
-                let y2=y*cX-z*sX,z3=y*sX+z*cX;return[x,y2,z3];
-              }
+              const _rx=(row.calib_rx||0)*Math.PI/180,_ry=(row.calib_ry||0)*Math.PI/180,_rz=(row.calib_rz||0)*Math.PI/180;
+              const _cX=Math.cos(_rx),_sX=Math.sin(_rx),_cY=Math.cos(_ry),_sY=Math.sin(_ry),_cZ=Math.cos(_rz),_sZ=Math.sin(_rz);
+              const _rotV=v=>{
+                let x=v[0]*_cZ-v[1]*_sZ,y=v[0]*_sZ+v[1]*_cZ,z=v[2];
+                let x2=x*_cY+z*_sY,z2=-x*_sY+z*_cY;x=x2;z=z2;
+                let y2=y*_cX-z*_sX,z3=y*_sX+z*_cX;return[x,y2,z3];
+              };
               faces=faces.map(f=>{
-                const nc=rotV([f.cx,f.cy,f.cz]);
-                return{...f,pos:f.pos.map(v=>rotV(v)),nor:f.nor?f.nor.map(v=>rotV(v)):f.nor,cx:nc[0],cy:nc[1],cz:nc[2]};
+                const nc=_rotV([f.cx,f.cy,f.cz]);
+                return{...f,pos:f.pos.map(v=>_rotV(v)),nor:f.nor?f.nor.map(v=>_rotV(v)):f.nor,cx:nc[0],cy:nc[1],cz:nc[2]};
               });
             }
           }
@@ -920,10 +1107,13 @@ const G=(()=>{
         }catch(e){console.error('Level load error:',row.name,e);}
       }
       document.getElementById('loading').style.display='none';
+      document.getElementById('empty').style.display='none';
       if(levels.length) buildPuzzle(0);
+      else {document.getElementById('empty').style.display='block'; document.querySelector('#empty p').textContent='No levels yet';}
     }catch(e){
       document.getElementById('loading').style.display='none';
       document.getElementById('empty').style.display='block';
+      document.querySelector('#empty p').textContent='Could not load levels';
       console.error('levels.json error:',e);
     }
   }
@@ -934,6 +1124,10 @@ const G=(()=>{
   return{
     loadLvl(i){buildPuzzle(i);},
     reset(){if(curIdx>=0)buildPuzzle(curIdx);},
+    nextLevel(){
+      document.getElementById('winModal').classList.remove('show');
+      if(curIdx<levels.length-1) buildPuzzle(curIdx+1);
+    },
     changePieces(d){
       if(curIdx<0)return;
       levels[curIdx].numPieces=Math.max(2,Math.min(30,levels[curIdx].numPieces+d));
@@ -944,9 +1138,81 @@ const G=(()=>{
       if(levels.length>0)buildPuzzle(Math.min(curIdx,levels.length-1));
       else{curIdx=-1;document.getElementById('barLevel').textContent='No model loaded';document.getElementById('empty').style.display='block';document.getElementById('pcSec').style.display='none';refreshAll();}
     },
-    closeWin(){document.getElementById('winModal').classList.remove('show');}
+    closeWin(){
+      document.getElementById('winModal').classList.remove('show');
+      // Show email capture once — only after first completed puzzle, never again
+      const asked = localStorage.getItem('pf_email_asked');
+      const given = localStorage.getItem('pf_email_given');
+      if(!asked && !given){
+        localStorage.setItem('pf_email_asked','1');
+        setTimeout(()=>document.getElementById('emailModal').classList.add('show'), 380);
+      }
+    }
   };
 })();
+</script>
+
+<!-- ── EMAIL CAPTURE LOGIC ─────────────────────────────────────── -->
+<script>
+// ── Formspree endpoint ────────────────────────────────────────────
+// FREE: 50 submissions/month — formspree.io → New Form → copy your ID
+// Replace YOUR_FORM_ID with e.g. "xpwzgkjb"
+// Until configured, submissions are console-logged only (safe for testing)
+const FORMSPREE_ID = 'YOUR_FORM_ID';
+
+async function submitEmail(){
+  const input = document.getElementById('emailInput');
+  const btn   = document.getElementById('emailSubmit');
+  const err   = document.getElementById('emailErr');
+  const email = input.value.trim();
+
+  if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+    err.style.display = 'block'; input.focus(); return;
+  }
+  err.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Sending…';
+
+  try{
+    if(FORMSPREE_ID === 'mreaqbee'){
+      // No endpoint yet — log only
+      console.log('[Puzzle & Form] Email captured (configure Formspree to save):', email);
+      await new Promise(r => setTimeout(r, 700));
+    } else {
+      const res = await fetch('https://formspree.io/f/' + FORMSPREE_ID, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ email, source: 'post-puzzle-win', ts: new Date().toISOString() })
+      });
+      if(!res.ok) throw new Error('Send failed ' + res.status);
+    }
+
+    localStorage.setItem('pf_email_given','1');
+    document.getElementById('emailForm').style.display   = 'none';
+    document.getElementById('emailThanks').style.display = 'block';
+    setTimeout(closeEmailModal, 3200);
+
+  } catch(e) {
+    btn.disabled = false; btn.textContent = 'Notify me';
+    err.textContent = 'Something went wrong — try again.';
+    err.style.display = 'block';
+  }
+}
+
+function closeEmailModal(){
+  document.getElementById('emailModal').classList.remove('show');
+  setTimeout(()=>{
+    document.getElementById('emailForm').style.display   = 'block';
+    document.getElementById('emailThanks').style.display = 'none';
+    document.getElementById('emailInput').value = '';
+    document.getElementById('emailErr').style.display    = 'none';
+    const btn = document.getElementById('emailSubmit');
+    btn.disabled = false; btn.textContent = 'Notify me';
+  }, 420);
+}
+
+document.getElementById('emailInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter') submitEmail();
+});
 </script>
 </body>
 </html>
