@@ -179,11 +179,12 @@ html,body{min-height:100%;background:var(--bg);color:var(--t);font-family:'Jost'
             <div class="calibRow"><label>Rotate X</label><input type="range" id="cRX" min="-180" max="180" value="0" oninput="updateCalib()"><span class="cv" id="cRXv">0°</span></div>
             <div class="calibRow"><label>Rotate Y</label><input type="range" id="cRY" min="-180" max="180" value="0" oninput="updateCalib()"><span class="cv" id="cRYv">0°</span></div>
             <div class="calibRow"><label>Rotate Z</label><input type="range" id="cRZ" min="-180" max="180" value="0" oninput="updateCalib()"><span class="cv" id="cRZv">0°</span></div>
+            <div class="calibRow"><label>Move up/down</label><input type="range" id="cOY" min="-3" max="3" step="0.05" value="0" oninput="updateOffsetY()"><span class="cv" id="cOYv">0</span></div>
             <div class="preview3d" id="previewContainer">
               <canvas id="previewCanvas"></canvas>
-              <div class="previewHint">Right drag to orbit</div>
+              <div class="previewHint">Drag to orbit · scroll to zoom</div>
             </div>
-            <button onclick="resetCalib()" style="margin-top:10px;background:none;border:1px solid var(--b);color:var(--m);font-family:'Jost',sans-serif;font-size:10px;padding:6px 14px;border-radius:3px;cursor:pointer;letter-spacing:.05em">Reset rotation</button>
+            <button onclick="resetCalib()" style="margin-top:10px;background:none;border:1px solid var(--b);color:var(--m);font-family:'Jost',sans-serif;font-size:10px;padding:6px 14px;border-radius:3px;cursor:pointer;letter-spacing:.05em">Reset all</button>
           </div>
         </div>
 
@@ -469,6 +470,8 @@ function selectLevel(i){
   document.getElementById('cRX').value=l.calibRX||0;
   document.getElementById('cRY').value=l.calibRY||0;
   document.getElementById('cRZ').value=l.calibRZ||0;
+  document.getElementById('cOY').value=l.offsetY||0;
+  document.getElementById('cOYv').textContent=(l.offsetY||0).toFixed(2);
   updateCalibLabels();
 }
 
@@ -505,25 +508,18 @@ function moveLevel(from,to){
 // ══════════════════════════════════════════════════════════════════
 function handleModel(file){
   if(!file||selIdx<0)return;
-  levels[selIdx].modelFile=file;
-  levels[selIdx].modelFn=file.name;
-  levels[selIdx].modelData=null; // will be set on publish
+  const idx=selIdx; // capture index at upload time
+  levels[idx].modelFile=file;
+  levels[idx].modelFn=file.name;
+  levels[idx].modelData=null;
+  levels[idx]._buf=null; // clear old buffer
   document.getElementById('modelInfo').style.display='flex';
   document.getElementById('modelFn').textContent=file.name;
   document.getElementById('modelFs').textContent=fmtB(file.size);
-  // Read and show calibration preview
   const reader=new FileReader();
   reader.onload=e=>{
-    // Safe base64 encoding for large files (no stack overflow)
-    const u8=new Uint8Array(e.target.result);
-    let b64='';
-    const chunk=8192;
-    for(let i=0;i<u8.length;i+=chunk){
-      b64+=btoa(String.fromCharCode(...u8.subarray(i,i+chunk)));
-    }
-    levels[selIdx]._previewB64=b64;
-    showCalibSection(levels[selIdx], true); // reset sliders for new file
-    initPreview(e.target.result);
+    levels[idx]._buf=e.target.result; // store raw ArrayBuffer on the level
+    showCalibSection(levels[idx], true); // showCalibSection calls initPreview
   };
   reader.readAsArrayBuffer(file);
   markDirty();
@@ -540,16 +536,29 @@ function clearModelUI(){
 
 function showCalibSection(l, resetSliders){
   document.getElementById('calibSection').style.display='block';
-  if(resetSliders){ l.calibRX=0;l.calibRY=0;l.calibRZ=0; }
+  if(resetSliders){ l.calibRX=0;l.calibRY=0;l.calibRZ=0;l.offsetY=0; }
   document.getElementById('cRX').value=l.calibRX||0;
   document.getElementById('cRY').value=l.calibRY||0;
   document.getElementById('cRZ').value=l.calibRZ||0;
+  document.getElementById('cOY').value=l.offsetY||0;
+  document.getElementById('cOYv').textContent=(l.offsetY||0).toFixed(2);
   updateCalibLabels();
-  // Init preview with stored data if available
-  if(l._previewB64||l.modelData){
-    const b64=l._previewB64||l.modelData;
-    const bin=atob(b64);const u8=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
-    initPreview(u8.buffer);
+  if(l._buf){
+    // Already have raw ArrayBuffer from this session upload — use directly
+    initPreview(l._buf);
+  } else if(l.modelData){
+    // Loaded from existing levels.json — decode base64 to buffer
+    const b64=l.modelData.replace(/\s/g,'');
+    const bin=atob(b64);
+    const buf=new ArrayBuffer(bin.length);
+    const u8=new Uint8Array(buf);
+    for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+    l._buf=buf; // cache it so switching back is instant
+    initPreview(buf);
+  } else {
+    // No model — clear preview
+    if(previewModel&&prevScene){prevScene.remove(previewModel);previewModel=null;}
+    document.getElementById('calibSection').style.display='none';
   }
 }
 
@@ -562,11 +571,23 @@ function updateCalib(){
   if(previewModel) applyCalib();
   markDirty();
 }
+function updateOffsetY(){
+  const v=+document.getElementById('cOY').value;
+  document.getElementById('cOYv').textContent=v.toFixed(2);
+  if(selIdx<0)return;
+  levels[selIdx].offsetY=v;
+  if(previewModel) previewModel.position.y=v;
+  markDirty();
+}
 function updateCalibLabels(){
   ['RX','RY','RZ'].forEach(a=>{document.getElementById('c'+a+'v').textContent=document.getElementById('c'+a).value+'°';});
 }
 function resetCalib(){
   ['cRX','cRY','cRZ'].forEach(id=>{document.getElementById(id).value=0;});
+  document.getElementById('cOY').value=0;
+  document.getElementById('cOYv').textContent='0';
+  if(selIdx>=0) levels[selIdx].offsetY=0;
+  if(previewModel) previewModel.position.y=0;
   updateCalib();
 }
 
@@ -646,7 +667,10 @@ function initPreview(arrayBuffer){
       // Sit model on grid: shift centre so bottom is at y=0
       const minY=box.min.y;
       group.position.y=-minY; // rest on grid
-      prevOrb.tx=ctr.x; prevOrb.ty=ctr.y-minY; prevOrb.tz=ctr.z;
+      // Apply saved offsetY (move up/down relative to grid)
+      const oy=selIdx>=0?(levels[selIdx].offsetY||0):0;
+      group.position.y=oy;
+      prevOrb.tx=ctr.x; prevOrb.ty=(ctr.y-minY)+oy; prevOrb.tz=ctr.z;
       prevOrb.r=sz*1.8; prevOrb.ph=.75; prevOrb.th=.5;
       updatePrevOrb();
     }catch(err){console.error('preview error',err);}
@@ -686,11 +710,15 @@ function loadGLBSimple(buf){
     off+=cl;
   }
   const g=JSON.parse(jc);
-  const res=[],imgs=[];
-  // Extract embedded images as blob URLs
+  const res=[],imgBytes=[];
+  // Store raw image bytes — avoids blob URL fetch issues in primsToPreviewMesh
   if(g.images)for(const im of g.images){
-    if(im.bufferView!=null){const bv=g.bufferViews[im.bufferView];imgs.push(URL.createObjectURL(new Blob([new Uint8Array(bc,bv.byteOffset||0,bv.byteLength)],{type:im.mimeType||'image/jpeg'})));}
-    else imgs.push(null);
+    if(im.bufferView!=null){
+      const bv=g.bufferViews[im.bufferView];
+      const src=new Uint8Array(bc,bv.byteOffset||0,bv.byteLength);
+      const copy=new Uint8Array(src.length);copy.set(src); // copy out of shared buffer
+      imgBytes.push({bytes:copy,mime:im.mimeType||'image/jpeg'});
+    } else imgBytes.push(null);
   }
   function getAcc(i){
     const a=g.accessors[i],bv=g.bufferViews[a.bufferView];
@@ -702,7 +730,7 @@ function loadGLBSimple(buf){
   function texUrl(mi){
     if(mi==null||!g.materials)return null;
     const t=g.materials[mi]?.pbrMetallicRoughness?.baseColorTexture?.index;
-    return t!=null?(imgs[g.textures[t]?.source]||null):null;
+    return t!=null?(imgBytes[g.textures[t]?.source]||null):null; // returns {bytes,mime} or null
   }
   // Matrix math for node tree walk
   const I=()=>[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
@@ -764,16 +792,19 @@ function primsToPreviewMesh(prims){
       color: (texUrl&&hasUV) ? 0xffffff : 0xc8b89a
     });
     if(texUrl&&hasUV){
-      // Load texture from blob URL — created during GLB parse in same session
-      const img=new Image();
-      img.onload=()=>{
-        const tex=new THREE.Texture(img);
-        tex.flipY=false; // glTF spec
-        tex.needsUpdate=true;
-        mat.map=tex;
-        mat.needsUpdate=true;
-      };
-      img.src=texUrl;
+      // texUrl is {bytes:Uint8Array, mime:string} — decode directly, no fetch needed
+      const blob=new Blob([texUrl.bytes],{type:texUrl.mime});
+      createImageBitmap(blob).then(bmp=>{
+        const cvs=document.createElement('canvas');
+        cvs.width=bmp.width; cvs.height=bmp.height;
+        const ctx=cvs.getContext('2d');
+        // Flip Y: glTF origin is bottom-left, canvas origin is top-left
+        ctx.translate(0,bmp.height); ctx.scale(1,-1);
+        ctx.drawImage(bmp,0,0);
+        const tex=new THREE.CanvasTexture(cvs);
+        tex.flipY=false; // already flipped above
+        mat.map=tex; mat.needsUpdate=true;
+      }).catch(e=>console.warn('Texture decode failed',e));
     }
     grp.add(new THREE.Mesh(geo,mat));
   });
@@ -863,7 +894,8 @@ async function publish(){
     sky_fn:l.skyFn||null,
     calib_rx:l.calibRX||0,
     calib_ry:l.calibRY||0,
-    calib_rz:l.calibRZ||0
+    calib_rz:l.calibRZ||0,
+    offset_y:l.offsetY||0
   }));
 
   showProgress('Committing to GitHub…', 75);
