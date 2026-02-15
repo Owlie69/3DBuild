@@ -91,6 +91,15 @@ canvas{width:100%;height:100%;display:block}
 .ethanks .ei{font-size:28px;margin-bottom:10px}
 .ethanks p{font-size:12px;color:var(--muted);line-height:1.7}
 
+/* Toast */
+#toast{position:absolute;top:16px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:10px 36px 10px 16px;font-size:12px;color:var(--text);letter-spacing:.03em;box-shadow:0 2px 12px rgba(0,0,0,.08);opacity:0;pointer-events:none;transition:opacity .35s,transform .35s;z-index:30;white-space:nowrap}
+#toast.show{opacity:1;pointer-events:auto;animation:toastIn .4s ease forwards}
+@keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(-10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+#toast.hide{animation:toastOut .3s ease forwards}
+@keyframes toastOut{from{opacity:1;transform:translateX(-50%) translateY(0)}to{opacity:0;transform:translateX(-50%) translateY(-10px)}}
+#toast .tx{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:2px 4px;line-height:1}
+#toast .tx:hover{color:var(--text)}
+
 /* Touch */
 canvas{touch-action:none}
 
@@ -125,6 +134,7 @@ canvas{touch-action:none}
   .einput input{padding:12px;font-size:14px}
   .einput button{padding:12px 14px;font-size:11px}
   .eskip{font-size:11px;padding:8px}
+  #toast{font-size:11px;padding:8px 32px 8px 12px;max-width:90vw;white-space:normal;text-align:center}
 }
 @media(max-width:380px){
   #bar{height:40px}
@@ -156,6 +166,7 @@ canvas{touch-action:none}
     </div>
     <div id="loading"><div class="spin"></div>Building puzzle…</div>
     <div id="dots"></div>
+    <div id="toast">Drag the pieces to the center to assemble<button class="tx" onclick="dismissToast()">&times;</button></div>
   </div>
   <div id="panel">
     <div class="psec">
@@ -604,7 +615,7 @@ const G=(()=>{
     });
   }
 
-  const orb={r:12,theta:.3,phi:1.0,tx:0,ty:0,tz:0,active:false,lx:0,ly:0,
+  const orb={r:16,theta:.3,phi:1.0,tx:0,ty:0,tz:0,active:false,lx:0,ly:0,
     update(){
       this.phi=Math.max(.1,Math.min(Math.PI-.1,this.phi));
       camera.position.set(
@@ -1027,8 +1038,9 @@ const G=(()=>{
         document.getElementById('barLevel').textContent=lvl.name;
         document.getElementById('pcSec').style.display='flex';
         document.getElementById('pcVal').textContent=N+' pieces';
-        orb.r=12;orb.theta=.4;orb.phi=.95;orb.tx=0;orb.ty=0;orb.tz=0;orb.update();
+        orb.r=16;orb.theta=.4;orb.phi=.95;orb.tx=0;orb.ty=0;orb.tz=0;orb.update();
         refreshAll();
+        showToast();
       }
 
       if(tex){
@@ -1106,10 +1118,13 @@ const G=(()=>{
       document.getElementById('buildBtn').style.display='block';
     }
     document.getElementById('winModal').classList.add('show');
+    // Show email capture once — right after completing the very first puzzle
+    maybeShowEmailCapture();
   }
 
-  // Show email capture once — only after first completed puzzle, never again
+  // Show email capture once — only after completing the first level, never again
   function maybeShowEmailCapture(){
+    if(curIdx!==0) return;
     const asked = localStorage.getItem('pf_email_asked');
     const given = localStorage.getItem('pf_email_given');
     if(!asked && !given){
@@ -1226,7 +1241,6 @@ const G=(()=>{
     reset(){if(curIdx>=0)buildPuzzle(curIdx);},
     nextLevel(){
       document.getElementById('winModal').classList.remove('show');
-      maybeShowEmailCapture();
       if(curIdx<levels.length-1) buildPuzzle(curIdx+1);
     },
 
@@ -1237,7 +1251,6 @@ const G=(()=>{
     },
     closeWin(){
       document.getElementById('winModal').classList.remove('show');
-      maybeShowEmailCapture();
     }
   };
 })();
@@ -1304,6 +1317,22 @@ function closeEmailModal(){
 document.getElementById('emailInput').addEventListener('keydown', e => {
   if(e.key === 'Enter') submitEmail();
 });
+
+// ── TOAST ────────────────────────────────────────────────────
+let toastTimer=null;
+function showToast(){
+  const el=document.getElementById('toast');
+  el.classList.remove('hide');
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(dismissToast,4500);
+}
+function dismissToast(){
+  clearTimeout(toastTimer);
+  const el=document.getElementById('toast');
+  el.classList.remove('show');
+  el.classList.add('hide');
+}
 </script>
 </body>
 </html>
