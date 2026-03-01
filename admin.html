@@ -1724,6 +1724,7 @@ function renderPaintedPreview(){
     updateCutOrb();
   }
 
+  document.getElementById('cutCard').style.display='block';
   renderPieceList();
 }
 
@@ -1861,6 +1862,8 @@ showCalibSection=function(l,resetSliders){
   }
   updateToolHint();
   renderCutPlaneList();
+  // Always show the cut card when a model is loaded
+  document.getElementById('cutCard').style.display='block';
   // Delayed preview — let calibration preview init first
   setTimeout(()=>{
     if(cutMode==='lasso'||cutMode==='box'){
