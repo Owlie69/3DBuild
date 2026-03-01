@@ -105,6 +105,29 @@ html,body{min-height:100%;background:var(--bg);color:var(--t);font-family:'Jost'
 .cutPlaneItem button{background:none;border:none;color:var(--m);cursor:pointer;font-size:13px;padding:0 4px}
 .cutPlaneItem button:hover{color:var(--red)}
 
+/* Painted mode — piece list */
+.pieceList{display:flex;flex-direction:column;gap:4px;margin-top:10px;max-height:200px;overflow-y:auto}
+.pieceItem{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--bg);border-radius:3px;font-size:11px;cursor:pointer;border:1px solid transparent;transition:all .15s}
+.pieceItem:hover{border-color:var(--b)}
+.pieceItem.active{border-color:var(--a)}
+.pieceItem .pcSwatch{width:14px;height:14px;border-radius:3px;flex-shrink:0}
+.pieceItem .pcLabel{flex:1}
+.pieceItem .pcCount{font-size:10px;color:var(--m)}
+.pieceItem .pcDel{background:none;border:none;color:var(--m);cursor:pointer;font-size:13px;padding:0 4px}
+.pieceItem .pcDel:hover{color:var(--red)}
+.unassignedInfo{font-size:10px;color:var(--m);padding:6px 0;display:flex;align-items:center;gap:6px}
+.unassignedInfo .dot{width:10px;height:10px;border-radius:2px;background:#555;flex-shrink:0}
+.paintToolbar{display:flex;gap:6px;margin:10px 0;flex-wrap:wrap}
+.paintBtn{padding:6px 14px;background:var(--bg);border:1px solid var(--b);border-radius:3px;font-family:'Jost',sans-serif;font-size:10px;cursor:pointer;color:var(--m);transition:all .15s;letter-spacing:.04em}
+.paintBtn:hover{border-color:var(--a);color:var(--a)}
+.paintBtn.active{background:var(--a);color:#fff;border-color:var(--a)}
+.paintBtn.danger{color:var(--red);border-color:#e8c4c4}
+.paintBtn.danger:hover{background:var(--red);color:#fff;border-color:var(--red)}
+.cutPreview{position:relative}
+.cutPreview .drawOverlay{position:absolute;inset:0;pointer-events:none;z-index:2}
+.cutPreview .drawOverlay.drawing{pointer-events:auto;cursor:crosshair}
+.cutPreview .toolHint{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:9px;color:rgba(255,255,255,.4);letter-spacing:.06em;pointer-events:none;z-index:3;white-space:nowrap}
+
 /* Danger */
 .dangerBtn{background:none;border:1px solid #e8c4c4;color:var(--red);border-radius:3px;padding:8px 16px;font-family:'Jost',sans-serif;font-size:11px;letter-spacing:.05em;cursor:pointer;transition:all .2s}
 .dangerBtn:hover{background:var(--red);color:#fff;border-color:var(--red)}
@@ -233,10 +256,16 @@ html,body{min-height:100%;background:var(--bg);color:var(--t);font-family:'Jost'
         <div class="card" id="cutCard" style="display:none">
           <div class="cardHead">Puzzle Cut Preview</div>
           <div class="cutModes">
-            <button class="cutMode active" id="cutModeAuto" onclick="setCutMode('auto')">Auto</button>
-            <button class="cutMode" id="cutModeManual" onclick="setCutMode('manual')">Manual Cuts</button>
+            <button class="cutMode active" id="cutModeAuto" onclick="setCutMode('auto')">Random</button>
+            <button class="cutMode" id="cutModeManual" onclick="setCutMode('manual')">Planes</button>
+            <button class="cutMode" id="cutModeLasso" onclick="setCutMode('lasso')">Lasso</button>
+            <button class="cutMode" id="cutModeBox" onclick="setCutMode('box')">Box</button>
           </div>
+
+          <!-- Auto info -->
           <div id="cutAutoInfo" style="font-size:10px;color:var(--m);margin-bottom:10px">The model will be split into a 3D grid based on piece count.</div>
+
+          <!-- Manual planes info -->
           <div id="cutManualInfo" style="font-size:10px;color:var(--m);margin-bottom:10px;display:none">
             Add axis-aligned cut planes. The model is sliced where each plane crosses it.
             <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
@@ -246,8 +275,27 @@ html,body{min-height:100%;background:var(--bg);color:var(--t);font-family:'Jost'
             </div>
             <div class="cutPlaneList" id="cutPlaneList"></div>
           </div>
+
+          <!-- Lasso / Box painted mode info -->
+          <div id="cutPaintedInfo" style="display:none">
+            <div style="font-size:10px;color:var(--m);margin-bottom:6px" id="cutPaintedHint">Draw on the model to select faces, then assign them to a piece.</div>
+            <div class="paintToolbar">
+              <button class="paintBtn active" id="paintDrawBtn" onclick="setPaintTool('draw')">Select</button>
+              <button class="paintBtn" id="paintOrbitBtn" onclick="setPaintTool('orbit')">Orbit</button>
+              <span style="flex:1"></span>
+              <button class="paintBtn" onclick="assignSelection()">Assign Piece</button>
+              <button class="paintBtn" onclick="autoFillRemaining()">Auto-fill rest</button>
+              <button class="paintBtn danger" onclick="undoLastPiece()">Undo last</button>
+            </div>
+            <div id="paintPieceList" class="pieceList"></div>
+            <div class="unassignedInfo" id="unassignedInfo"><span class="dot"></span> <span id="unassignedCount">0</span> unassigned faces</div>
+          </div>
+
+          <!-- 3D preview canvas + drawing overlay -->
           <div class="cutPreview" id="cutPreviewContainer">
             <canvas id="cutCanvas"></canvas>
+            <canvas class="drawOverlay" id="drawOverlay"></canvas>
+            <div class="toolHint" id="cutToolHint"></div>
           </div>
           <div style="display:flex;gap:8px;margin-top:10px">
             <button onclick="refreshCutPreview()" style="flex:1;padding:8px;background:var(--bg);border:1px solid var(--b);border-radius:3px;font-family:'Jost',sans-serif;font-size:11px;cursor:pointer;color:var(--m);transition:all .15s">Refresh Preview</button>
@@ -464,6 +512,7 @@ async function initApp(){
       offsetY:r.offset_y||0,
       cutMode:r.cut_mode||'auto',
       cutPlanes:r.cut_planes||[],
+      cutGroups:r.cut_groups||null,  // painted mode: array of face-index arrays
       modelFile:null, skyFile:null   // new local files not yet committed
     }));
     toast('Loaded '+levels.length+' level(s)');
@@ -552,7 +601,7 @@ function syncField(field,val){
 }
 
 function addLevel(){
-  levels.push({id:crypto.randomUUID(),name:'New Level',pieces:15,snapTolerance:30,modelData:null,modelFn:null,skyData:null,skyMime:'image/jpeg',skyFn:null,calibRX:0,calibRY:0,calibRZ:0,offsetY:0,cutMode:'auto',cutPlanes:[],modelFile:null,skyFile:null});
+  levels.push({id:crypto.randomUUID(),name:'New Level',pieces:15,snapTolerance:30,modelData:null,modelFn:null,skyData:null,skyMime:'image/jpeg',skyFn:null,calibRX:0,calibRY:0,calibRZ:0,offsetY:0,cutMode:'auto',cutPlanes:[],cutGroups:null,modelFile:null,skyFile:null});
   markDirty();renderList();selectLevel(levels.length-1);
 }
 
@@ -1007,7 +1056,8 @@ async function publish(){
     calib_rz:l.calibRZ||0,
     offset_y:l.offsetY||0,
     cut_mode:l.cutMode||'auto',
-    cut_planes:l.cutPlanes||[]
+    cut_planes:l.cutPlanes||[],
+    cut_groups:l.cutGroups||null
   }));
 
   showProgress('Committing to GitHub…', 75);
@@ -1165,18 +1215,130 @@ function buildCutGeo(fg){
   return bg;
 }
 
+// ── PAINTED MODE STATE ──
+let paintTool='draw';      // 'draw' or 'orbit'
+let paintGroups=[];        // array of arrays of face indices: [[0,3,5],[1,2,4],...]
+let paintSelection=new Set(); // face indices currently selected (before assignment)
+let drawPoints=[];         // lasso points or box start/end
+let isDrawing=false;
+let drawOverlayCtx=null;
+
 function setCutMode(mode){
   cutMode=mode;
   document.getElementById('cutModeAuto').classList.toggle('active',mode==='auto');
   document.getElementById('cutModeManual').classList.toggle('active',mode==='manual');
+  document.getElementById('cutModeLasso').classList.toggle('active',mode==='lasso');
+  document.getElementById('cutModeBox').classList.toggle('active',mode==='box');
   document.getElementById('cutAutoInfo').style.display=mode==='auto'?'block':'none';
   document.getElementById('cutManualInfo').style.display=mode==='manual'?'block':'none';
+  document.getElementById('cutPaintedInfo').style.display=(mode==='lasso'||mode==='box')?'block':'none';
+  // Update hint
+  if(mode==='lasso') document.getElementById('cutPaintedHint').textContent='Draw a freehand lasso around faces to select them, then assign to a piece.';
+  else if(mode==='box') document.getElementById('cutPaintedHint').textContent='Draw a rectangle around faces to select them, then assign to a piece.';
+  // Update overlay
+  const overlay=document.getElementById('drawOverlay');
+  if(mode==='lasso'||mode==='box'){
+    overlay.classList.add('drawing');
+    setPaintTool('draw');
+  } else {
+    overlay.classList.remove('drawing');
+  }
+  // Update tool hint
+  updateToolHint();
   if(selIdx>=0){
     levels[selIdx].cutMode=mode;
-    if(mode==='auto') levels[selIdx].cutPlanes=[];
+    if(mode==='auto'){ levels[selIdx].cutPlanes=[]; levels[selIdx].cutGroups=null; }
+    if(mode==='manual'){ levels[selIdx].cutGroups=null; }
     markDirty();
   }
-  refreshCutPreview();
+  // Reset painted state when switching to lasso/box
+  if(mode==='lasso'||mode==='box'){
+    paintSelection=new Set();
+    // Load existing groups if available
+    if(selIdx>=0 && levels[selIdx].cutGroups && levels[selIdx].cutGroups.length){
+      paintGroups=levels[selIdx].cutGroups.map(g=>[...g]);
+    } else {
+      paintGroups=[];
+    }
+    renderPaintedPreview();
+    renderPieceList();
+  } else {
+    refreshCutPreview();
+  }
+}
+
+function setPaintTool(tool){
+  paintTool=tool;
+  const overlay=document.getElementById('drawOverlay');
+  document.getElementById('paintDrawBtn').classList.toggle('active',tool==='draw');
+  document.getElementById('paintOrbitBtn').classList.toggle('active',tool==='orbit');
+  if(tool==='draw'&&(cutMode==='lasso'||cutMode==='box')){
+    overlay.classList.add('drawing');
+  } else {
+    overlay.classList.remove('drawing');
+  }
+  updateToolHint();
+}
+
+function updateToolHint(){
+  const el=document.getElementById('cutToolHint');
+  if(!el) return;
+  if(cutMode==='lasso'&&paintTool==='draw') el.textContent='Draw lasso · right-click to orbit';
+  else if(cutMode==='box'&&paintTool==='draw') el.textContent='Drag rectangle · right-click to orbit';
+  else if(paintTool==='orbit') el.textContent='Drag to orbit · scroll to zoom';
+  else el.textContent='Drag to orbit · scroll to zoom';
+}
+
+// ── 2D PROJECTION: project 3D face centroids to canvas coords ──
+function projectFaceCentroids(){
+  if(!cutFacesCache||!cutCamera||!cutRenderer) return [];
+  const canvas=document.getElementById('cutCanvas');
+  const w=canvas.width, h=canvas.height;
+  const mvp=new THREE.Matrix4().multiplyMatrices(cutCamera.projectionMatrix,cutCamera.matrixWorldInverse);
+  return cutFacesCache.map((f,i)=>{
+    const v=new THREE.Vector3(f.cx,f.cy,f.cz).applyMatrix4(mvp);
+    return { idx:i, x:(v.x*0.5+0.5)*w, y:(-v.y*0.5+0.5)*h, z:v.z };
+  }).filter(p=>p.z>-1&&p.z<1); // only visible faces
+}
+
+// ── POINT-IN-POLYGON test ──
+function pointInPoly(px,py,poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];
+    if(((yi>py)!==(yj>py))&&(px<(xj-xi)*(py-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+
+// ── POINT-IN-RECT test ──
+function pointInRect(px,py,x1,y1,x2,y2){
+  const lx=Math.min(x1,x2),rx=Math.max(x1,x2),ty=Math.min(y1,y2),by=Math.max(y1,y2);
+  return px>=lx&&px<=rx&&py>=ty&&py<=by;
+}
+
+// ── GET FACES ALREADY ASSIGNED to any group ──
+function assignedFaces(){
+  const s=new Set();
+  for(const g of paintGroups) for(const fi of g) s.add(fi);
+  return s;
+}
+
+// ── SELECT FACES from a 2D selection shape ──
+function selectFacesInShape(shape){
+  const projected=projectFaceCentroids();
+  const assigned=assignedFaces();
+  paintSelection=new Set();
+  if(cutMode==='lasso'&&shape.length>=3){
+    for(const p of projected){
+      if(!assigned.has(p.idx)&&pointInPoly(p.x,p.y,shape)) paintSelection.add(p.idx);
+    }
+  } else if(cutMode==='box'&&shape.length===2){
+    for(const p of projected){
+      if(!assigned.has(p.idx)&&pointInRect(p.x,p.y,shape[0][0],shape[0][1],shape[1][0],shape[1][1])) paintSelection.add(p.idx);
+    }
+  }
+  renderPaintedPreview();
 }
 
 function addCutPlane(axis){
@@ -1215,12 +1377,24 @@ function renderCutPlaneList(){
 function initCutPreview(){
   const container=document.getElementById('cutPreviewContainer');
   const canvas=document.getElementById('cutCanvas');
+  const overlay=document.getElementById('drawOverlay');
   if(!container||!canvas) return;
 
   function setup(){
     const w=container.offsetWidth;
     const h=300;
     if(!w){setTimeout(setup,150);return;}
+
+    // Size overlay to match
+    if(overlay){
+      overlay.width=w*window.devicePixelRatio;
+      overlay.height=h*window.devicePixelRatio;
+      overlay.style.width=w+'px';
+      overlay.style.height=h+'px';
+      drawOverlayCtx=overlay.getContext('2d');
+      drawOverlayCtx.scale(window.devicePixelRatio,window.devicePixelRatio);
+    }
+
     if(!cutRenderer){
       cutRenderer=new THREE.WebGLRenderer({canvas,antialias:true});
       cutRenderer.setClearColor(0x15120e,1);
@@ -1233,19 +1407,76 @@ function initCutPreview(){
       sun.position.set(5,10,7);cutScene.add(sun);
       const fill=new THREE.DirectionalLight(0x8090ff,0.2);
       fill.position.set(-5,2,-5);cutScene.add(fill);
-      // Orbit controls
+
+      // Orbit controls — on the main canvas (works when overlay not drawing)
       canvas.addEventListener('mousedown',e=>{cutOrb.on=true;cutOrb.lx=e.clientX;cutOrb.ly=e.clientY;e.preventDefault();});
       canvas.addEventListener('touchstart',e=>{const t=e.touches[0];cutOrb.on=true;cutOrb.lx=t.clientX;cutOrb.ly=t.clientY;},{passive:true});
       window.addEventListener('mousemove',e=>{if(!cutOrb.on)return;cutOrb.th-=(e.clientX-cutOrb.lx)*.006;cutOrb.ph=Math.max(.05,Math.min(1.55,cutOrb.ph-(e.clientY-cutOrb.ly)*.006));cutOrb.lx=e.clientX;cutOrb.ly=e.clientY;updateCutOrb();});
       window.addEventListener('touchmove',e=>{if(!cutOrb.on)return;const t=e.touches[0];cutOrb.th-=(t.clientX-cutOrb.lx)*.006;cutOrb.ph=Math.max(.05,Math.min(1.55,cutOrb.ph-(t.clientY-cutOrb.ly)*.006));cutOrb.lx=t.clientX;cutOrb.ly=t.clientY;updateCutOrb();},{passive:true});
-      window.addEventListener('mouseup',()=>cutOrb.on=false);
-      window.addEventListener('touchend',()=>cutOrb.on=false);
+      window.addEventListener('mouseup',()=>{cutOrb.on=false;});
+      window.addEventListener('touchend',()=>{cutOrb.on=false;});
       canvas.addEventListener('wheel',e=>{cutOrb.r=Math.max(.5,Math.min(40,cutOrb.r*(1+e.deltaY*.001)));updateCutOrb();e.preventDefault();},{passive:false});
+
+      // Drawing events on overlay
+      if(overlay){
+        // Right-click orbit from overlay
+        overlay.addEventListener('contextmenu',e=>{e.preventDefault();});
+        overlay.addEventListener('mousedown',e=>{
+          if(e.button===2){
+            // Right-click = orbit
+            cutOrb.on=true;cutOrb.lx=e.clientX;cutOrb.ly=e.clientY;
+            e.preventDefault();return;
+          }
+          if(paintTool!=='draw') return;
+          const rect=overlay.getBoundingClientRect();
+          const x=e.clientX-rect.left, y=e.clientY-rect.top;
+          isDrawing=true;
+          drawPoints=[[x,y]];
+          clearDrawOverlay();
+          e.preventDefault();
+        });
+        overlay.addEventListener('mousemove',e=>{
+          if(!isDrawing) return;
+          const rect=overlay.getBoundingClientRect();
+          const x=e.clientX-rect.left, y=e.clientY-rect.top;
+          if(cutMode==='lasso'){
+            drawPoints.push([x,y]);
+            drawLasso(drawPoints);
+          } else if(cutMode==='box'){
+            drawPoints[1]=[x,y];
+            drawBox(drawPoints[0],drawPoints[1]);
+          }
+        });
+        overlay.addEventListener('mouseup',e=>{
+          if(e.button===2){cutOrb.on=false;return;}
+          if(!isDrawing) return;
+          isDrawing=false;
+          if(cutMode==='lasso'&&drawPoints.length>=3){
+            selectFacesInShape(drawPoints);
+          } else if(cutMode==='box'&&drawPoints.length===2){
+            selectFacesInShape(drawPoints);
+          }
+          clearDrawOverlay();
+        });
+        overlay.addEventListener('wheel',e=>{
+          cutOrb.r=Math.max(.5,Math.min(40,cutOrb.r*(1+e.deltaY*.001)));
+          updateCutOrb();e.preventDefault();
+        },{passive:false});
+      }
+
       new ResizeObserver(()=>{
         const nw=container.offsetWidth;
         if(!nw||!cutRenderer)return;
         cutRenderer.setSize(nw,h);
         cutCamera.aspect=nw/h;cutCamera.updateProjectionMatrix();
+        if(overlay){
+          overlay.width=nw*window.devicePixelRatio;
+          overlay.height=h*window.devicePixelRatio;
+          overlay.style.width=nw+'px';
+          overlay.style.height=h+'px';
+          drawOverlayCtx=overlay.getContext('2d');
+          drawOverlayCtx.scale(window.devicePixelRatio,window.devicePixelRatio);
+        }
       }).observe(container);
       if(!cutLoopRunning){
         cutLoopRunning=true;
@@ -1258,6 +1489,41 @@ function initCutPreview(){
   }
   setTimeout(setup,150);
 }
+
+// ── DRAW OVERLAY HELPERS ──
+function clearDrawOverlay(){
+  if(!drawOverlayCtx) return;
+  const c=document.getElementById('drawOverlay');
+  drawOverlayCtx.clearRect(0,0,c.width/window.devicePixelRatio,c.height/window.devicePixelRatio);
+}
+function drawLasso(pts){
+  if(!drawOverlayCtx||pts.length<2) return;
+  const ctx=drawOverlayCtx;
+  const c=document.getElementById('drawOverlay');
+  ctx.clearRect(0,0,c.width/window.devicePixelRatio,c.height/window.devicePixelRatio);
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0],pts[0][1]);
+  for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i][0],pts[i][1]);
+  ctx.closePath();
+  ctx.fillStyle='rgba(200,169,110,0.15)';
+  ctx.fill();
+  ctx.strokeStyle='rgba(200,169,110,0.7)';
+  ctx.lineWidth=1.5;
+  ctx.stroke();
+}
+function drawBox(p1,p2){
+  if(!drawOverlayCtx||!p1||!p2) return;
+  const ctx=drawOverlayCtx;
+  const c=document.getElementById('drawOverlay');
+  ctx.clearRect(0,0,c.width/window.devicePixelRatio,c.height/window.devicePixelRatio);
+  const x=Math.min(p1[0],p2[0]),y=Math.min(p1[1],p2[1]);
+  const w=Math.abs(p2[0]-p1[0]),h=Math.abs(p2[1]-p1[1]);
+  ctx.fillStyle='rgba(200,169,110,0.15)';
+  ctx.fillRect(x,y,w,h);
+  ctx.strokeStyle='rgba(200,169,110,0.7)';
+  ctx.lineWidth=1.5;
+  ctx.strokeRect(x,y,w,h);
+}
 function updateCutOrb(){
   if(!cutCamera)return;
   cutCamera.position.set(
@@ -1265,6 +1531,200 @@ function updateCutOrb(){
     cutOrb.ty+cutOrb.r*Math.cos(cutOrb.ph),
     cutOrb.tz+cutOrb.r*Math.sin(cutOrb.ph)*Math.cos(cutOrb.th)
   );cutCamera.lookAt(cutOrb.tx,cutOrb.ty,cutOrb.tz);
+}
+
+// ── PIECE MANAGEMENT (painted modes) ──
+function assignSelection(){
+  if(paintSelection.size===0){ toast('No faces selected — draw on the model first'); return; }
+  paintGroups.push([...paintSelection]);
+  paintSelection=new Set();
+  if(selIdx>=0){ levels[selIdx].cutGroups=paintGroups.map(g=>[...g]); markDirty(); }
+  renderPaintedPreview();
+  renderPieceList();
+  toast('Piece #'+paintGroups.length+' assigned ('+paintGroups[paintGroups.length-1].length+' faces)');
+}
+
+function undoLastPiece(){
+  if(!paintGroups.length){ toast('No pieces to undo'); return; }
+  paintGroups.pop();
+  paintSelection=new Set();
+  if(selIdx>=0){ levels[selIdx].cutGroups=paintGroups.map(g=>[...g]); markDirty(); }
+  renderPaintedPreview();
+  renderPieceList();
+  toast('Last piece removed');
+}
+
+function deletePiece(idx){
+  if(idx<0||idx>=paintGroups.length) return;
+  paintGroups.splice(idx,1);
+  if(selIdx>=0){ levels[selIdx].cutGroups=paintGroups.map(g=>[...g]); markDirty(); }
+  renderPaintedPreview();
+  renderPieceList();
+}
+
+function autoFillRemaining(){
+  if(!cutFacesCache) return;
+  const assigned=assignedFaces();
+  const remaining=[];
+  for(let i=0;i<cutFacesCache.length;i++) if(!assigned.has(i)) remaining.push(i);
+  if(!remaining.length){ toast('All faces already assigned'); return; }
+  // Split remaining into groups using auto algorithm on remaining faces
+  const remFaces=remaining.map(i=>cutFacesCache[i]);
+  const targetPieces=Math.max(1,(selIdx>=0?(levels[selIdx].pieces||15):15)-paintGroups.length);
+  const groups=splitFaces(remFaces,targetPieces);
+  // Convert back to original face indices
+  for(const grp of groups){
+    const idxs=grp.map(f=>{
+      // Find original index by matching centroid
+      for(let i=0;i<cutFacesCache.length;i++){
+        if(cutFacesCache[i]===f) return i;
+      }
+      return -1;
+    }).filter(i=>i>=0);
+    if(idxs.length) paintGroups.push(idxs);
+  }
+  paintSelection=new Set();
+  if(selIdx>=0){ levels[selIdx].cutGroups=paintGroups.map(g=>[...g]); markDirty(); }
+  renderPaintedPreview();
+  renderPieceList();
+  toast('Auto-filled '+groups.length+' piece(s) from remaining faces');
+}
+
+function renderPieceList(){
+  const el=document.getElementById('paintPieceList');
+  if(!el) return;
+  if(!paintGroups.length){
+    el.innerHTML='<div style="font-size:10px;color:var(--m);padding:4px 0">No pieces defined yet</div>';
+  } else {
+    el.innerHTML=paintGroups.map((g,i)=>{
+      const col='#'+CUT_COLORS[i%CUT_COLORS.length].toString(16).padStart(6,'0');
+      return `<div class="pieceItem">
+        <div class="pcSwatch" style="background:${col}"></div>
+        <span class="pcLabel">Piece ${i+1}</span>
+        <span class="pcCount">${g.length} faces</span>
+        <button class="pcDel" onclick="deletePiece(${i})">✕</button>
+      </div>`;
+    }).join('');
+  }
+  // Update unassigned count
+  const total=cutFacesCache?cutFacesCache.length:0;
+  const usedCount=assignedFaces().size+paintSelection.size;
+  document.getElementById('unassignedCount').textContent=(total-usedCount);
+  document.getElementById('cutPieceCount').textContent=paintGroups.length+' piece'+(paintGroups.length===1?'':'s')+' · '+total+' total faces';
+}
+
+// ── RENDER PAINTED PREVIEW (lasso/box mode visualization) ──
+function renderPaintedPreview(){
+  // Build face cache if missing
+  if(!cutFacesCache){
+    if(selIdx<0) return;
+    const l=levels[selIdx];
+    if(!l._buf&&!l.modelData) return;
+    let buf=l._buf;
+    if(!buf&&l.modelData){
+      const b64=l.modelData.replace(/\s/g,'');
+      const bin=atob(b64);buf=new ArrayBuffer(bin.length);
+      const u8=new Uint8Array(buf);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+    }
+    if(!buf) return;
+    const prims=loadGLBSimple(buf);
+    let mnx=Infinity,mny=Infinity,mnz=Infinity,mxx=-Infinity,mxy=-Infinity,mxz=-Infinity;
+    prims.forEach(({pos})=>{for(let i=0;i<pos.length;i+=3){mnx=Math.min(mnx,pos[i]);mxx=Math.max(mxx,pos[i]);mny=Math.min(mny,pos[i+1]);mxy=Math.max(mxy,pos[i+1]);mnz=Math.min(mnz,pos[i+2]);mxz=Math.max(mxz,pos[i+2]);}});
+    const cx=(mnx+mxx)/2,cy=(mny+mxy)/2,cz=(mnz+mxz)/2;
+    const sc=2.5/Math.max(mxx-mnx,mxy-mny,mxz-mnz,0.001);
+    cutFacesCache=primsToFaces(prims,sc,cx,cy,cz);
+    let b={mnx:Infinity,mny:Infinity,mnz:Infinity,mxx:-Infinity,mxy:-Infinity,mxz:-Infinity};
+    for(const f of cutFacesCache){b.mnx=Math.min(b.mnx,f.cx);b.mny=Math.min(b.mny,f.cy);b.mnz=Math.min(b.mnz,f.cz);b.mxx=Math.max(b.mxx,f.cx);b.mxy=Math.max(b.mxy,f.cy);b.mxz=Math.max(b.mxz,f.cz);}
+    cutBoundsCache=b;
+  }
+  // Initialize renderer if needed
+  if(!cutRenderer) initCutPreview();
+  if(!cutScene) return;
+
+  // Clear old meshes
+  cutPieceMeshes.forEach(m=>{cutScene.remove(m);m.geometry.dispose();m.material.dispose();});
+  cutPieceMeshes=[];
+  cutScene.children.filter(c=>c.userData.isCutPlane).forEach(c=>cutScene.remove(c));
+
+  const assigned=assignedFaces();
+  const SHRINK=0.025;
+
+  // Draw each assigned piece
+  paintGroups.forEach((group,gi)=>{
+    const faces=group.map(fi=>cutFacesCache[fi]).filter(Boolean);
+    if(!faces.length) return;
+    let pcx=0,pcy=0,pcz=0,cnt=0;
+    for(const f of faces){for(const v of f.pos){pcx+=v[0];pcy+=v[1];pcz+=v[2];cnt++;}}
+    pcx/=cnt;pcy/=cnt;pcz/=cnt;
+    const gv=[],gn=[];
+    for(const f of faces){
+      for(let k=0;k<3;k++){
+        const v=f.pos[k];
+        gv.push(v[0]+(pcx-v[0])*SHRINK,v[1]+(pcy-v[1])*SHRINK,v[2]+(pcz-v[2])*SHRINK);
+        if(f.nor&&f.nor[k]) gn.push(f.nor[k][0],f.nor[k][1],f.nor[k][2]);
+      }
+    }
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.Float32BufferAttribute(gv,3));
+    if(gn.length===gv.length) geo.setAttribute('normal',new THREE.Float32BufferAttribute(gn,3));
+    else geo.computeVertexNormals();
+    const mat=new THREE.MeshStandardMaterial({color:CUT_COLORS[gi%CUT_COLORS.length],roughness:.7,metalness:0,side:THREE.DoubleSide});
+    const mesh=new THREE.Mesh(geo,mat);
+    cutScene.add(mesh);cutPieceMeshes.push(mesh);
+  });
+
+  // Draw current selection (highlighted in yellow)
+  if(paintSelection.size>0){
+    const faces=[...paintSelection].map(fi=>cutFacesCache[fi]).filter(Boolean);
+    const gv=[],gn=[];
+    for(const f of faces){
+      for(let k=0;k<3;k++){
+        gv.push(f.pos[k][0],f.pos[k][1],f.pos[k][2]);
+        if(f.nor&&f.nor[k]) gn.push(f.nor[k][0],f.nor[k][1],f.nor[k][2]);
+      }
+    }
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.Float32BufferAttribute(gv,3));
+    if(gn.length===gv.length) geo.setAttribute('normal',new THREE.Float32BufferAttribute(gn,3));
+    else geo.computeVertexNormals();
+    const mat=new THREE.MeshStandardMaterial({color:0xf0d060,roughness:.5,metalness:0,side:THREE.DoubleSide,emissive:0x443300,emissiveIntensity:0.3});
+    const mesh=new THREE.Mesh(geo,mat);
+    mesh.userData.isCutPlane=true; // tag for cleanup
+    cutScene.add(mesh);cutPieceMeshes.push(mesh);
+  }
+
+  // Draw unassigned faces in dark gray (semi-transparent)
+  const unassigned=[];
+  for(let i=0;i<cutFacesCache.length;i++){
+    if(!assigned.has(i)&&!paintSelection.has(i)) unassigned.push(i);
+  }
+  if(unassigned.length>0){
+    const faces=unassigned.map(fi=>cutFacesCache[fi]);
+    const gv=[],gn=[];
+    for(const f of faces){
+      for(let k=0;k<3;k++){
+        gv.push(f.pos[k][0],f.pos[k][1],f.pos[k][2]);
+        if(f.nor&&f.nor[k]) gn.push(f.nor[k][0],f.nor[k][1],f.nor[k][2]);
+      }
+    }
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.Float32BufferAttribute(gv,3));
+    if(gn.length===gv.length) geo.setAttribute('normal',new THREE.Float32BufferAttribute(gn,3));
+    else geo.computeVertexNormals();
+    const mat=new THREE.MeshStandardMaterial({color:0x555555,roughness:.9,metalness:0,side:THREE.DoubleSide,transparent:true,opacity:0.35});
+    const mesh=new THREE.Mesh(geo,mat);
+    mesh.userData.isCutPlane=true;
+    cutScene.add(mesh);cutPieceMeshes.push(mesh);
+  }
+
+  // Fit camera if first render
+  if(!cutOrb._fitted){
+    cutOrb.tx=0;cutOrb.ty=0;cutOrb.tz=0;cutOrb.r=4;cutOrb.ph=.8;cutOrb.th=.5;
+    cutOrb._fitted=true;
+    updateCutOrb();
+  }
+
+  renderPieceList();
 }
 
 function refreshCutPreview(){
@@ -1377,17 +1837,38 @@ const _origShowCalib=showCalibSection;
 showCalibSection=function(l,resetSliders){
   _origShowCalib(l,resetSliders);
   // Reset cut cache when model changes
-  cutFacesCache=null;cutBoundsCache=null;
+  cutFacesCache=null;cutBoundsCache=null;cutOrb._fitted=false;
   // Load saved cut settings
   cutMode=l.cutMode||'auto';
   cutPlanes=l.cutPlanes?[...l.cutPlanes]:[];
+  paintGroups=l.cutGroups?l.cutGroups.map(g=>[...g]):[];
+  paintSelection=new Set();
+
   document.getElementById('cutModeAuto').classList.toggle('active',cutMode==='auto');
   document.getElementById('cutModeManual').classList.toggle('active',cutMode==='manual');
+  document.getElementById('cutModeLasso').classList.toggle('active',cutMode==='lasso');
+  document.getElementById('cutModeBox').classList.toggle('active',cutMode==='box');
   document.getElementById('cutAutoInfo').style.display=cutMode==='auto'?'block':'none';
   document.getElementById('cutManualInfo').style.display=cutMode==='manual'?'block':'none';
+  document.getElementById('cutPaintedInfo').style.display=(cutMode==='lasso'||cutMode==='box')?'block':'none';
+
+  const overlay=document.getElementById('drawOverlay');
+  if(cutMode==='lasso'||cutMode==='box'){
+    overlay.classList.add('drawing');
+    setPaintTool('draw');
+  } else {
+    overlay.classList.remove('drawing');
+  }
+  updateToolHint();
   renderCutPlaneList();
   // Delayed preview — let calibration preview init first
-  setTimeout(()=>refreshCutPreview(),400);
+  setTimeout(()=>{
+    if(cutMode==='lasso'||cutMode==='box'){
+      renderPaintedPreview();
+    } else {
+      refreshCutPreview();
+    }
+  },400);
 };
 </script>
 </body>

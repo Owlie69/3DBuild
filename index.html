@@ -1028,10 +1028,21 @@ const G=(()=>{
         ghostMesh.position.y=lvl.offsetY||0;
         scene.add(ghostMesh);
 
-        // Build pieces — auto grid or manual planes
-        const chunks=lvl.cutMode==='manual'&&lvl.cutPlanes&&lvl.cutPlanes.length
-          ? splitByPlanes(nf,lvl.cutPlanes)
-          : splitFaces(nf,N);
+        // Build pieces — auto grid, manual planes, or painted groups (lasso/box)
+        let chunks;
+        if((lvl.cutMode==='lasso'||lvl.cutMode==='box')&&lvl.cutGroups&&lvl.cutGroups.length){
+          // Painted mode: use stored face-index groups
+          chunks=lvl.cutGroups.map(idxs=>idxs.map(i=>nf[i]).filter(Boolean));
+          // Add any unassigned faces as one extra chunk
+          const assigned=new Set();
+          for(const g of lvl.cutGroups) for(const i of g) assigned.add(i);
+          const remainder=nf.filter((_,i)=>!assigned.has(i));
+          if(remainder.length>0) chunks.push(remainder);
+        } else if(lvl.cutMode==='manual'&&lvl.cutPlanes&&lvl.cutPlanes.length){
+          chunks=splitByPlanes(nf,lvl.cutPlanes);
+        } else {
+          chunks=splitFaces(nf,N);
+        }
         const radius=5.5+N*.28;
         chunks.forEach((chunk,i)=>{
           const geo=buildGeo(chunk);
@@ -1244,6 +1255,7 @@ const G=(()=>{
             snapTolerance:(row.snap_tolerance||30)/100,
             cutMode:row.cut_mode||'auto',
             cutPlanes:row.cut_planes||[],
+            cutGroups:row.cut_groups||null,
             modelUrl:null
           });
           refreshLvList();
