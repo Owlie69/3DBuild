@@ -103,6 +103,28 @@ canvas{width:100%;height:100%;display:block}
 /* Touch */
 canvas{touch-action:none}
 
+/* Mute button */
+#muteBtn{background:none;border:1px solid var(--border);border-radius:2px;padding:4px 8px;font-size:14px;cursor:pointer;color:var(--muted);transition:border-color .2s,color .2s;line-height:1;user-select:none}
+#muteBtn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* Level Select Screen */
+#levelSelect{position:fixed;inset:0;background:var(--bg);z-index:50;display:none;flex-direction:column;align-items:center;overflow-y:auto}
+#levelSelect.show{display:flex}
+.lsHeader{padding:48px 24px 24px;text-align:center}
+.lsHeader h1{font-family:'Cormorant Garamond',serif;font-size:28px;font-weight:400;margin-bottom:8px}
+.lsHeader p{font-size:12px;color:var(--muted);letter-spacing:.06em}
+.lsGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;padding:0 24px 48px;width:100%;max-width:900px}
+.lsCard{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:24px 20px;cursor:pointer;transition:all .2s;display:flex;flex-direction:column;gap:10px;position:relative;overflow:hidden}
+.lsCard:hover{border-color:var(--accent);box-shadow:0 2px 12px rgba(0,0,0,.06)}
+.lsCard .lsNum{font-family:'Cormorant Garamond',serif;font-size:32px;font-weight:300;color:var(--border);line-height:1}
+.lsCard .lsName{font-size:14px;font-weight:400}
+.lsCard .lsMeta{font-size:10px;color:var(--muted);letter-spacing:.04em}
+.lsCard .lsStars{font-size:14px;color:var(--accent);letter-spacing:2px;min-height:18px}
+.lsCard.completed{border-color:var(--snap)}
+.lsCard.completed .lsNum{color:var(--snap)}
+.lsCard .lsBadge{position:absolute;top:12px;right:12px;font-size:14px;color:var(--snap);opacity:0}
+.lsCard.completed .lsBadge{opacity:1}
+
 /* Mobile */
 @media(max-width:640px){
   #bar{padding:0 10px;gap:6px;height:44px}
@@ -135,6 +157,13 @@ canvas{touch-action:none}
   .einput button{padding:12px 14px;font-size:11px}
   .eskip{font-size:11px;padding:8px}
   #toast{font-size:11px;padding:8px 32px 8px 12px;max-width:90vw;white-space:normal;text-align:center}
+  .lsGrid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding:0 16px 32px}
+  .lsCard{padding:18px 14px}
+  .lsCard .lsNum{font-size:24px}
+  .lsCard .lsName{font-size:12px}
+  .lsHeader{padding:32px 16px 16px}
+  .lsHeader h1{font-size:22px}
+  #muteBtn{padding:3px 6px;font-size:12px}
 }
 @media(max-width:380px){
   #bar{height:40px}
@@ -186,6 +215,7 @@ canvas{touch-action:none}
   <div class="bstat">Pieces&nbsp;<b id="bPieces">0 / 0</b></div>
   <div class="bstat">Time&nbsp;<b id="bTime">0:00</b></div>
   <div class="bstat">Placements&nbsp;<b id="bMoves">0</b></div>
+  <button id="muteBtn" onclick="toggleMute()" title="Toggle sound">🔊</button>
 </div>
 <div id="wrap">
   <div id="cv">
@@ -212,14 +242,16 @@ canvas{touch-action:none}
     </div>
     <div class="psec">
       <div class="plabel">Actions</div>
+      <button class="btn" onclick="G.undo()">Undo</button>
       <button class="btn" onclick="G.reset()">Reset</button>
-
+      <button class="btn" onclick="G.showLevelSelect()">Levels</button>
     </div>
     <div class="psec">
       <div class="plabel">Controls</div>
       <div class="hr"><span class="hk">Drag piece</span>Move</div>
       <div class="hr"><span class="hk">Right drag</span>Orbit</div>
       <div class="hr"><span class="hk">Scroll</span>Zoom</div>
+      <div class="hr"><span class="hk">Ctrl+Z</span>Undo</div>
     </div>
   </div>
 </div>
@@ -251,6 +283,15 @@ canvas{touch-action:none}
       <button class="btn" id="buildBtn" style="border-color:var(--accent);color:var(--accent);display:none" onclick="window.location.href='build.html'">Build in 3D →</button>
     </div>
   </div>
+</div>
+
+<!-- ── LEVEL SELECT ── -->
+<div id="levelSelect">
+  <div class="lsHeader">
+    <h1>Build Your <em style="font-style:italic;color:#2d6e4e">Paris</em></h1>
+    <p>Select a puzzle to play</p>
+  </div>
+  <div class="lsGrid" id="lsGrid"></div>
 </div>
 
 <!-- ── EMAIL CAPTURE ── -->
@@ -685,6 +726,26 @@ const G=(()=>{
     }
   };orb.update();
 
+  // ── SOUND SYSTEM (Web Audio API) ────────────────────────────
+  let audioCtx=null;
+  function isMuted(){return localStorage.getItem('pf_muted')==='1';}
+  function ensureAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx;}
+  function playTone(freq,dur,type,vol){
+    if(isMuted())return;const ctx=ensureAudio();
+    const o=ctx.createOscillator(),g=ctx.createGain();
+    o.type=type||'sine';o.frequency.value=freq;
+    g.gain.setValueAtTime(vol||.12,ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+dur);
+    o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+dur);
+  }
+  function sfxSnap(){playTone(880,.12,'sine',.15);setTimeout(()=>playTone(1320,.1,'sine',.1),60);}
+  function sfxWin(){[0,120,240,360,480].forEach((d,i)=>setTimeout(()=>playTone([523,659,784,1047,1319][i],.25,'triangle',.13),d));}
+  function sfxUndo(){playTone(440,.08,'square',.06);setTimeout(()=>playTone(330,.08,'square',.05),50);}
+  function updateMuteBtn(){document.getElementById('muteBtn').textContent=sfxMuted?'🔇':'🔊';}
+
+  // ── UNDO HISTORY ──────────────────────────────────────────────
+  let undoStack=[];  // [{pieceIdx, prevPos:{x,y,z}}]
+
   const levels=[];
   let curIdx=-1,pieces=[],ghostMesh=null;
   let moves=0,t0=null,tInt=null,isDone=false;
@@ -778,6 +839,7 @@ const G=(()=>{
     if(piece.position.distanceTo(piece.userData.correctPos)>snapRadius(piece)) return false;
     piece.position.copy(piece.userData.correctPos);
     piece.userData.isPlaced=true;
+    sfxSnap();
     // Bright flash then settle to dim permanent outline
     setOutline(piece,1.0);
     let ft=0;
@@ -835,6 +897,8 @@ const G=(()=>{
     if(lastSelected&&lastSelected!==root) setOutline(lastSelected,0);
     dragging=root;lastSelected=root;
     dragMoved=false;
+    // Save position for undo before move
+    root.userData._undoPos={x:root.position.x,y:root.position.y,z:root.position.z};
     hPlane.constant=-root.position.y;
     const pt=new THREE.Vector3();
     rc.ray.intersectPlane(hPlane,pt);
@@ -845,8 +909,16 @@ const G=(()=>{
   function releaseDrag(){
     if(dragArrowActive){dragArrowActive=null;}
     if(dragging){
-      if(dragMoved){moves++;refreshStats();dragMoved=false;}
+      if(dragMoved){
+        moves++;refreshStats();dragMoved=false;
+        // Push undo entry
+        if(dragging.userData._undoPos){
+          undoStack.push({pieceIdx:dragging.userData.pieceIdx,prevPos:{...dragging.userData._undoPos},wasPlaced:false});
+        }
+      }
       if(trySnap(dragging)){
+        // Mark last undo entry as snapped
+        if(undoStack.length) undoStack[undoStack.length-1].wasPlaced=true;
         lastSelected=null;dragging=null;attachGizmo(null);
       } else {
         // Keep gizmo visible — user can grab arrow immediately
@@ -1136,7 +1208,7 @@ const G=(()=>{
 
   function clearAll(){
     dragging=null;dragArrowActive=null;lastSelected=null;
-    attachGizmo(null);
+    attachGizmo(null);undoStack=[];
     const rm=new Set();
     pieces.forEach(p=>rm.add(p));
     scene.traverse(c=>{if(c.userData.isGhost)rm.add(c);});
@@ -1146,6 +1218,7 @@ const G=(()=>{
 
   function onWin(){
     if(isDone)return;isDone=true;clearInterval(tInt);
+    sfxWin();
     const e=Math.floor((Date.now()-t0)/1000);
     document.getElementById('wTime').textContent=Math.floor(e/60)+':'+(e%60).toString().padStart(2,'0');
     document.getElementById('wMoves').textContent=moves;
@@ -1163,6 +1236,9 @@ const G=(()=>{
       el.classList.remove('on');
       if(i<=stars) setTimeout(()=>el.classList.add('on'), i*180);
     }
+
+    // ── Save progress to localStorage ─────────────────────────
+    saveProgress(curIdx,stars,e,moves);
 
     // ── Next level button ─────────────────────────────────────
     const hasNext = curIdx < levels.length-1;
@@ -1226,8 +1302,90 @@ const G=(()=>{
   function refreshLvList(){
     const el=document.getElementById('lvList');
     if(!levels.length){el.innerHTML='<div style="font-size:11px;color:var(--muted);padding:4px 0">No models yet</div>';return;}
-    el.innerHTML=levels.map((l,i)=>`<div class="lv ${i===curIdx?'active':''} ${l.completed?'done':''}" onclick="G.loadLvl(${i})"><div style="flex:1"><div class="ln">${l.name}</div><div class="ld">${l.numPieces} pieces</div></div><span class="lck">✓</span></div>`).join('');
+    el.innerHTML=levels.map((l,i)=>{
+      const stars=l.bestStars?'★'.repeat(l.bestStars):'';
+      return`<div class="lv ${i===curIdx?'active':''} ${l.completed?'done':''}" onclick="G.loadLvl(${i})"><div style="flex:1"><div class="ln">${l.name}</div><div class="ld">${l.numPieces} pieces${stars?' · '+stars:''}</div></div><span class="lck">✓</span></div>`;
+    }).join('');
   }
+
+  // ── PROGRESS PERSISTENCE ─────────────────────────────────────
+  function saveProgress(idx,stars,time,mv){
+    let prog={};
+    try{prog=JSON.parse(localStorage.getItem('pf_progress')||'{}');}catch(e){}
+    const key='lv_'+idx;
+    const prev=prog[key];
+    // Keep best star rating and best time
+    if(!prev||stars>prev.stars||(stars===prev.stars&&time<prev.time)){
+      prog[key]={stars,time,moves:mv,completedAt:Date.now()};
+    }
+    localStorage.setItem('pf_progress',JSON.stringify(prog));
+  }
+  function loadProgress(){
+    let prog={};
+    try{prog=JSON.parse(localStorage.getItem('pf_progress')||'{}');}catch(e){}
+    return prog;
+  }
+  function restoreProgress(){
+    const prog=loadProgress();
+    levels.forEach((l,i)=>{
+      const p=prog['lv_'+i];
+      if(p){l.completed=true;l.bestStars=p.stars;l.bestTime=p.time;}
+    });
+    refreshLvList();
+  }
+
+  // ── UNDO ──────────────────────────────────────────────────────
+  function undoMove(){
+    if(!undoStack.length||isDone) return;
+    const entry=undoStack.pop();
+    const piece=pieces[entry.pieceIdx];
+    if(!piece) return;
+    if(entry.wasPlaced){
+      piece.userData.isPlaced=false;
+      levels[curIdx].piecesPlaced=Math.max(0,levels[curIdx].piecesPlaced-1);
+      setOutline(piece,0);
+      piece.traverse(c=>{if(c.userData.isOutline)c.scale.setScalar(1.07);});
+    }
+    piece.position.set(entry.prevPos.x,entry.prevPos.y,entry.prevPos.z);
+    moves=Math.max(0,moves-1);
+    sfxUndo();
+    refreshStats();refreshDots();refreshLvList();
+  }
+
+  // ── LEVEL SELECT SCREEN ────────────────────────────────────────
+  function renderLevelSelect(){
+    const grid=document.getElementById('lsGrid');
+    const prog=loadProgress();
+    grid.innerHTML=levels.map((l,i)=>{
+      const p=prog['lv_'+i];
+      const done=p?true:false;
+      const stars=p?'★'.repeat(p.stars)+'☆'.repeat(3-p.stars):'';
+      const bestTime=p?Math.floor(p.time/60)+':'+(p.time%60).toString().padStart(2,'0'):'';
+      return`<div class="lsCard ${done?'completed':''}" onclick="G.selectLevel(${i})">
+        <span class="lsBadge">✓</span>
+        <div class="lsNum">${i+1}</div>
+        <div class="lsName">${l.name}</div>
+        <div class="lsMeta">${l.numPieces} pieces${bestTime?' · Best '+bestTime:''}</div>
+        <div class="lsStars">${stars}</div>
+      </div>`;
+    }).join('');
+  }
+  function showLevelSelect(){
+    renderLevelSelect();
+    document.getElementById('levelSelect').classList.add('show');
+  }
+  function hideLevelSelect(){
+    document.getElementById('levelSelect').classList.remove('show');
+  }
+
+  // ── KEYBOARD SHORTCUTS ─────────────────────────────────────────
+  window.addEventListener('keydown',e=>{
+    if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();undoMove();}
+    if(e.key==='Escape'){
+      const ls=document.getElementById('levelSelect');
+      if(ls.classList.contains('show')){hideLevelSelect();return;}
+    }
+  });
 
   // ── LOAD LEVELS FROM levels.json ────────────────────────────
   async function loadLevelsFromJSON(){
@@ -1296,7 +1454,11 @@ const G=(()=>{
       }
       document.getElementById('loading').style.display='none';
       document.getElementById('empty').style.display='none';
-      if(levels.length) buildPuzzle(0);
+      restoreProgress();
+      if(levels.length){
+        if(levels.length>1) showLevelSelect();
+        else buildPuzzle(0);
+      }
       else {document.getElementById('empty').style.display='block'; document.querySelector('#empty p').textContent='No levels yet';}
     }catch(e){
       document.getElementById('loading').style.display='none';
@@ -1312,6 +1474,9 @@ const G=(()=>{
   return{
     loadLvl(i){buildPuzzle(i);},
     reset(){if(curIdx>=0)buildPuzzle(curIdx);},
+    undo(){undoMove();},
+    showLevelSelect(){showLevelSelect();},
+    selectLevel(i){hideLevelSelect();buildPuzzle(i);},
     nextLevel(){
       document.getElementById('winModal').classList.remove('show');
       if(curIdx<levels.length-1) buildPuzzle(curIdx+1);
@@ -1406,6 +1571,15 @@ function dismissToast(){
   el.classList.remove('show');
   el.classList.add('hide');
 }
+
+// ── MUTE TOGGLE ──────────────────────────────────────────────
+function toggleMute(){
+  const btn=document.getElementById('muteBtn');
+  const muted=localStorage.getItem('pf_muted')==='1';
+  if(muted){localStorage.removeItem('pf_muted');btn.textContent='🔊';}
+  else{localStorage.setItem('pf_muted','1');btn.textContent='🔇';}
+}
+(function(){const b=document.getElementById('muteBtn');if(b&&localStorage.getItem('pf_muted')==='1')b.textContent='🔇';})();
 </script>
 </body>
 </html>
