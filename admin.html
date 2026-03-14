@@ -306,7 +306,7 @@ html,body{min-height:100%;background:var(--bg);color:var(--t);font-family:'Jost'
 
           <!-- Manual planes info -->
           <div id="cutManualInfo" style="font-size:10px;color:var(--m);margin-bottom:10px;display:none">
-            Add axis-aligned cut planes. The model is sliced where each plane crosses it.
+            Add cut planes and rotate them freely. The model is sliced where each plane crosses it.
             <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
               <button class="cutPlaneAdd" onclick="addCutPlane('x')" style="padding:5px 12px;background:var(--bg);border:1px solid var(--b);border-radius:3px;font-family:'Jost',sans-serif;font-size:10px;cursor:pointer;color:var(--m);transition:all .15s">+ X plane</button>
               <button class="cutPlaneAdd" onclick="addCutPlane('y')" style="padding:5px 12px;background:var(--bg);border:1px solid var(--b);border-radius:3px;font-family:'Jost',sans-serif;font-size:10px;cursor:pointer;color:var(--m);transition:all .15s">+ Y plane</button>
@@ -1248,23 +1248,25 @@ function splitFaces(faces,N){
   return result;
 }
 
-// Manual plane splitter — splits faces by axis-aligned planes
+// Manual plane splitter — splits faces by (optionally rotated) planes
 function splitByPlanes(faces, planes, bounds){
   if(!faces.length||!planes.length) return [faces];
   const {mnx,mny,mnz,mxx,mxy,mxz}=bounds;
-  // Sort planes so we split progressively
-  const sorted=[...planes].sort((a,b)=>a.pos-b.pos);
   let groups=[faces];
-  for(const pl of sorted){
+  for(const pl of planes){
+    const n=planeNormal(pl);
+    // Plane point: interpolate along the original axis by pl.pos
+    let px,py,pz;
+    if(pl.axis==='x'){px=mnx+(mxx-mnx)*pl.pos;py=(mny+mxy)/2;pz=(mnz+mxz)/2;}
+    else if(pl.axis==='y'){px=(mnx+mxx)/2;py=mny+(mxy-mny)*pl.pos;pz=(mnz+mxz)/2;}
+    else{px=(mnx+mxx)/2;py=(mny+mxy)/2;pz=mnz+(mxz-mnz)*pl.pos;}
     const newGroups=[];
     for(const grp of groups){
       const a=[],b=[];
       for(const f of grp){
-        let val;
-        if(pl.axis==='x') val=(f.cx-mnx)/(mxx-mnx||1);
-        else if(pl.axis==='y') val=(f.cy-mny)/(mxy-mny||1);
-        else val=(f.cz-mnz)/(mxz-mnz||1);
-        if(val<pl.pos) a.push(f); else b.push(f);
+        // Signed distance from face centroid to plane
+        const d=(f.cx-px)*n.nx+(f.cy-py)*n.ny+(f.cz-pz)*n.nz;
+        if(d<0) a.push(f); else b.push(f);
       }
       if(a.length) newGroups.push(a);
       if(b.length) newGroups.push(b);
@@ -1578,36 +1580,66 @@ function selectFacesInShape(shape){
 }
 
 function addCutPlane(axis){
-  cutPlanes.push({axis,pos:0.5});
-  if(selIdx>=0){levels[selIdx].cutPlanes=[...cutPlanes];markDirty();}
+  cutPlanes.push({axis,pos:0.5,tiltA:0,tiltB:0});
+  if(selIdx>=0){levels[selIdx].cutPlanes=cutPlanes.map(p=>({...p}));markDirty();}
   renderCutPlaneList();
   refreshCutPreview();
 }
 
 function removeCutPlane(idx){
   cutPlanes.splice(idx,1);
-  if(selIdx>=0){levels[selIdx].cutPlanes=[...cutPlanes];markDirty();}
+  if(selIdx>=0){levels[selIdx].cutPlanes=cutPlanes.map(p=>({...p}));markDirty();}
   renderCutPlaneList();
   refreshCutPreview();
 }
 
-function updateCutPlane(idx,val){
-  cutPlanes[idx].pos=val;
-  if(selIdx>=0){levels[selIdx].cutPlanes=[...cutPlanes];markDirty();}
+function updateCutPlane(idx,field,val){
+  cutPlanes[idx][field]=val;
+  if(selIdx>=0){levels[selIdx].cutPlanes=cutPlanes.map(p=>({...p}));markDirty();}
+  if(field!=='pos') renderCutPlaneList();
   refreshCutPreview();
+}
+function planeNormal(pl){
+  // Start with axis-aligned normal, then apply tiltA and tiltB rotations
+  const tA=(pl.tiltA||0)*Math.PI/180, tB=(pl.tiltB||0)*Math.PI/180;
+  let nx=0,ny=0,nz=0;
+  if(pl.axis==='x'){
+    // base normal [1,0,0], tiltA rotates around Y, tiltB rotates around Z
+    nx=Math.cos(tA)*Math.cos(tB); ny=Math.sin(tB); nz=-Math.sin(tA)*Math.cos(tB);
+  } else if(pl.axis==='y'){
+    // base normal [0,1,0], tiltA rotates around X, tiltB rotates around Z
+    nx=-Math.sin(tB); ny=Math.cos(tA)*Math.cos(tB); nz=Math.sin(tA)*Math.cos(tB);
+  } else {
+    // base normal [0,0,1], tiltA rotates around X, tiltB rotates around Y
+    nx=Math.sin(tB); ny=-Math.sin(tA)*Math.cos(tB); nz=Math.cos(tA)*Math.cos(tB);
+  }
+  return {nx,ny,nz};
 }
 
 function renderCutPlaneList(){
   const el=document.getElementById('cutPlaneList');
   if(!cutPlanes.length){el.innerHTML='<div style="font-size:10px;color:var(--m);padding:4px 0">No cut planes added</div>';return;}
-  el.innerHTML=cutPlanes.map((p,i)=>`
-    <div class="cutPlaneItem">
-      <label>${p.axis.toUpperCase()} cut</label>
-      <input type="range" min="5" max="95" value="${Math.round(p.pos*100)}" oninput="updateCutPlane(${i},this.value/100);this.nextElementSibling.textContent=this.value+'%'">
-      <span class="cpv">${Math.round(p.pos*100)}%</span>
-      <button onclick="removeCutPlane(${i})">✕</button>
-    </div>
-  `).join('');
+  el.innerHTML=cutPlanes.map((p,i)=>{
+    const tA=p.tiltA||0, tB=p.tiltB||0;
+    const labels=p.axis==='x'?['Y tilt','Z tilt']:p.axis==='y'?['X tilt','Z tilt']:['X tilt','Y tilt'];
+    return `
+    <div class="cutPlaneItem" style="flex-direction:column;align-items:stretch">
+      <div style="display:flex;align-items:center;gap:8px">
+        <label>${p.axis.toUpperCase()} cut</label>
+        <input type="range" min="5" max="95" value="${Math.round(p.pos*100)}" oninput="updateCutPlane(${i},'pos',this.value/100);this.nextElementSibling.textContent=this.value+'%'" style="flex:1">
+        <span class="cpv">${Math.round(p.pos*100)}%</span>
+        <button onclick="removeCutPlane(${i})">✕</button>
+      </div>
+      <div style="display:flex;gap:6px;padding-left:48px;margin-top:2px">
+        <label style="font-size:9px;color:var(--m);width:32px">${labels[0]}</label>
+        <input type="range" min="-80" max="80" value="${tA}" oninput="updateCutPlane(${i},'tiltA',+this.value);this.nextElementSibling.textContent=this.value+'°'" style="flex:1;height:14px">
+        <span class="cpv" style="font-size:9px;width:30px">${tA}°</span>
+        <label style="font-size:9px;color:var(--m);width:32px">${labels[1]}</label>
+        <input type="range" min="-80" max="80" value="${tB}" oninput="updateCutPlane(${i},'tiltB',+this.value);this.nextElementSibling.textContent=this.value+'°'" style="flex:1;height:14px">
+        <span class="cpv" style="font-size:9px;width:30px">${tB}°</span>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function initCutPreview(){
@@ -2039,7 +2071,7 @@ function refreshCutPreview(){
     cutPieceMeshes.push(mesh);
   });
 
-  // Draw manual cut plane indicators
+  // Draw manual cut plane indicators (with rotation support)
   if(cutMode==='manual'&&cutPlanes.length&&cutBoundsCache){
     const b=cutBoundsCache;
     const sz=Math.max(b.mxx-b.mnx,b.mxy-b.mny,b.mxz-b.mnz,1);
@@ -2048,21 +2080,19 @@ function refreshCutPreview(){
       const planeMat=new THREE.MeshBasicMaterial({color:0xff4444,transparent:true,opacity:0.12,side:THREE.DoubleSide,depthWrite:false});
       const planeMesh=new THREE.Mesh(planeGeo,planeMat);
       planeMesh.userData.isCutPlane=true;
-      if(pl.axis==='x'){
-        planeMesh.rotation.y=Math.PI/2;
-        planeMesh.position.x=b.mnx+(b.mxx-b.mnx)*pl.pos;
-        planeMesh.position.y=(b.mny+b.mxy)/2;
-        planeMesh.position.z=(b.mnz+b.mxz)/2;
-      } else if(pl.axis==='y'){
-        planeMesh.rotation.x=Math.PI/2;
-        planeMesh.position.x=(b.mnx+b.mxx)/2;
-        planeMesh.position.y=b.mny+(b.mxy-b.mny)*pl.pos;
-        planeMesh.position.z=(b.mnz+b.mxz)/2;
-      } else {
-        planeMesh.position.x=(b.mnx+b.mxx)/2;
-        planeMesh.position.y=(b.mny+b.mxy)/2;
-        planeMesh.position.z=b.mnz+(b.mxz-b.mnz)*pl.pos;
-      }
+      // Position on the original axis
+      let px,py,pz;
+      if(pl.axis==='x'){px=b.mnx+(b.mxx-b.mnx)*pl.pos;py=(b.mny+b.mxy)/2;pz=(b.mnz+b.mxz)/2;}
+      else if(pl.axis==='y'){px=(b.mnx+b.mxx)/2;py=b.mny+(b.mxy-b.mny)*pl.pos;pz=(b.mnz+b.mxz)/2;}
+      else{px=(b.mnx+b.mxx)/2;py=(b.mny+b.mxy)/2;pz=b.mnz+(b.mxz-b.mnz)*pl.pos;}
+      planeMesh.position.set(px,py,pz);
+      // Build rotation: start with axis-aligned orientation, then apply tilt
+      const n=planeNormal(pl);
+      // PlaneGeometry faces +Z by default; rotate so it faces the computed normal
+      const up=new THREE.Vector3(0,0,1);
+      const target=new THREE.Vector3(n.nx,n.ny,n.nz).normalize();
+      const q=new THREE.Quaternion().setFromUnitVectors(up,target);
+      planeMesh.quaternion.copy(q);
       cutScene.add(planeMesh);
     });
   }
@@ -2085,7 +2115,7 @@ showCalibSection=function(l,resetSliders){
   cutMode=l.cutMode||'auto';
   // 'smart' uses the same UI as 'auto' (the Smart button)
   if(cutMode==='smart') cutMode='auto';
-  cutPlanes=l.cutPlanes?[...l.cutPlanes]:[];
+  cutPlanes=l.cutPlanes?l.cutPlanes.map(p=>({...p})):[];
   paintGroups=l.cutGroups?l.cutGroups.map(g=>[...g]):[];
   smartGroups=(l.cutMode==='smart'&&l.cutGroups)?l.cutGroups.map(g=>[...g]):[];
   smartHighlight=-1;
