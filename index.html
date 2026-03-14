@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Puzzle · 3D</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Jost:wght@300;400;500&display=swap');
@@ -125,6 +127,18 @@ canvas{touch-action:none}
 .lsCard .lsBadge{position:absolute;top:12px;right:12px;font-size:14px;color:var(--snap);opacity:0}
 .lsCard.completed .lsBadge{opacity:1}
 
+/* Home button (floating on canvas) */
+#homeBtn{position:absolute;top:16px;left:16px;z-index:10;background:var(--surface);border:1px solid var(--border);border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.08);transition:border-color .2s,transform .15s;font-size:16px;color:var(--muted);line-height:1;-webkit-tap-highlight-color:transparent}
+#homeBtn:hover{border-color:var(--accent);color:var(--accent)}
+#homeBtn:active{transform:scale(.92)}
+
+/* iPhone safe areas */
+@supports(padding: env(safe-area-inset-top)){
+  #bar{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env(safe-area-inset-right))}
+  #panel{padding-bottom:max(20px,env(safe-area-inset-bottom))}
+  #homeBtn{top:max(16px,env(safe-area-inset-top));left:max(16px,env(safe-area-inset-left))}
+}
+
 /* Mobile */
 @media(max-width:640px){
   #bar{padding:0 10px;gap:6px;height:44px}
@@ -164,6 +178,15 @@ canvas{touch-action:none}
   .lsHeader{padding:32px 16px 16px}
   .lsHeader h1{font-size:22px}
   #muteBtn{padding:3px 6px;font-size:12px}
+  #homeBtn{width:44px;height:44px;font-size:18px;top:10px;left:10px}
+  /* Bigger touch targets for iPhone */
+  .lv{min-height:44px}
+}
+@supports(padding: env(safe-area-inset-bottom)){
+  @media(max-width:640px){
+    #panel{padding-bottom:max(8px,env(safe-area-inset-bottom))}
+    #dots{bottom:max(14px,calc(env(safe-area-inset-bottom) + 6px))}
+  }
 }
 @media(max-width:380px){
   #bar{height:40px}
@@ -222,6 +245,7 @@ canvas{touch-action:none}
     <canvas id="c"></canvas>
     <div id="sFlash"></div>
     <div id="sLabel">snapped</div>
+    <button id="homeBtn" onclick="G.goHome()" title="Back to levels" style="display:none">&#8962;</button>
 
     <div id="empty">
       <div class="ei">◇</div>
@@ -555,8 +579,8 @@ function parseOBJ(text){
   return faces;
 }
 
-// ── SPATIAL SPLITTER ──────────────────────────────────────────
-function splitFaces(faces,N){
+// ── SPATIAL SPLITTER (grid fallback) ──────────────────────────
+function splitFacesGrid(faces,N){
   if(!faces.length) return [];
   let mnx=Infinity,mny=Infinity,mnz=Infinity,mxx=-Infinity,mxy=-Infinity,mxz=-Infinity;
   for(const f of faces){mnx=Math.min(mnx,f.cx);mny=Math.min(mny,f.cy);mnz=Math.min(mnz,f.cz);mxx=Math.max(mxx,f.cx);mxy=Math.max(mxy,f.cy);mxz=Math.max(mxz,f.cz);}
@@ -582,6 +606,155 @@ function splitFaces(faces,N){
   groups.sort((a,b)=>b.length-a.length);
   while(groups.length>N){const a=groups.pop(),b=groups.pop();groups.push([...a,...b]);groups.sort((a,b)=>b.length-a.length);}
   return groups.filter(g=>g.length>0);
+}
+
+// ── EDGE-AWARE SPLITTER (realistic cuts along object edges) ──
+// Builds a face adjacency graph weighted by dihedral angles + colour
+// similarity, then grows regions from seeds so cuts follow sharp
+// edges, object boundaries, and layer transitions naturally.
+function splitFaces(faces,N){
+  if(!faces.length) return [];
+  if(N<=1) return [faces];
+  const nF=faces.length;
+  // Fallback for tiny meshes
+  if(nF<N*2) return splitFacesGrid(faces,N);
+
+  // 1. Face normals
+  const normals=new Array(nF);
+  for(let i=0;i<nF;i++){
+    const [a,b,c]=faces[i].pos;
+    const ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2];
+    const vx=c[0]-a[0],vy=c[1]-a[1],vz=c[2]-a[2];
+    let nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;
+    const len=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
+    normals[i]=[nx/len,ny/len,nz/len];
+  }
+
+  // 2. Build adjacency via shared-edge hash
+  const eps=1e-4;
+  const q=v=>Math.round(v/eps);
+  const vk=v=>q(v[0])+','+q(v[1])+','+q(v[2]);
+  const edgeMap=new Map();
+  for(let fi=0;fi<nF;fi++){
+    const f=faces[fi];
+    for(let j=0;j<3;j++){
+      const k1=vk(f.pos[j]),k2=vk(f.pos[(j+1)%3]);
+      const ek=k1<k2?k1+'|'+k2:k2+'|'+k1;
+      if(!edgeMap.has(ek)) edgeMap.set(ek,[]);
+      edgeMap.get(ek).push(fi);
+    }
+  }
+
+  // Build adjacency list with weights
+  const adj=Array.from({length:nF},()=>[]);
+  const hasCol=faces[0]&&faces[0].col&&faces[0].col.length>0;
+  for(const fList of edgeMap.values()){
+    for(let i=0;i<fList.length;i++){
+      for(let j=i+1;j<fList.length;j++){
+        const a=fList[i],b=fList[j];
+        // Dihedral angle weight: cos(angle/2) → 1.0 flat, 0.0 at 90°, -ve sharp
+        const dot=normals[a][0]*normals[b][0]+normals[a][1]*normals[b][1]+normals[a][2]*normals[b][2];
+        const angle=Math.acos(Math.max(-1,Math.min(1,dot)));
+        const angleW=Math.cos(angle*.5);
+        // Colour similarity (if vertex colours available)
+        let colW=1.0;
+        if(hasCol&&faces[a].col&&faces[b].col){
+          const ca=faces[a].col,cb=faces[b].col;
+          let dr=0,dg=0,db=0;
+          for(let k=0;k<3;k++){dr+=(ca[k]?ca[k][0]:0)-(cb[k]?cb[k][0]:0);dg+=(ca[k]?ca[k][1]:0)-(cb[k]?cb[k][1]:0);db+=(ca[k]?ca[k][2]:0)-(cb[k]?cb[k][2]:0);}
+          dr/=3;dg/=3;db/=3;
+          colW=1.0-Math.min(1.0,Math.sqrt(dr*dr+dg*dg+db*db)*3);
+        }
+        // UV discontinuity detection (texture seams = natural cut lines)
+        let uvW=1.0;
+        if(faces[a].uv&&faces[b].uv&&faces[a].uv.length===3&&faces[b].uv.length===3){
+          // Check if shared edge has matching UVs (same UV = continuous texture)
+          const posA=faces[a].pos,posB=faces[b].pos;
+          let sharedPairs=0,uvMatch=0;
+          for(let vi=0;vi<3;vi++){
+            for(let vj=0;vj<3;vj++){
+              if(vk(posA[vi])===vk(posB[vj])){
+                sharedPairs++;
+                const duv=Math.abs(faces[a].uv[vi][0]-faces[b].uv[vj][0])+Math.abs(faces[a].uv[vi][1]-faces[b].uv[vj][1]);
+                if(duv<0.01) uvMatch++;
+              }
+            }
+          }
+          if(sharedPairs>=2&&uvMatch<sharedPairs) uvW=0.3; // UV seam — prefer to cut here
+        }
+        const w=angleW*0.45+colW*0.3+uvW*0.25;
+        adj[a].push({to:b,w});
+        adj[b].push({to:a,w});
+      }
+    }
+  }
+
+  // 3. Farthest-point seeding
+  const seeds=[0];
+  const dist=new Float32Array(nF).fill(Infinity);
+  for(let s=1;s<N&&s<nF;s++){
+    const last=seeds[s-1];
+    const lx=faces[last].cx,ly=faces[last].cy,lz=faces[last].cz;
+    for(let i=0;i<nF;i++){
+      const d=(faces[i].cx-lx)**2+(faces[i].cy-ly)**2+(faces[i].cz-lz)**2;
+      if(d<dist[i]) dist[i]=d;
+    }
+    let maxD=-1,maxI=0;
+    for(let i=0;i<nF;i++){if(dist[i]>maxD){maxD=dist[i];maxI=i;}}
+    seeds.push(maxI);
+  }
+
+  // 4. Priority-queue region growing (binary heap)
+  const label=new Int32Array(nF).fill(-1);
+  // Simple max-heap
+  const heap=[];
+  function heapPush(item){heap.push(item);let i=heap.length-1;while(i>0){const p=(i-1)>>1;if(heap[p].w>=heap[i].w)break;[heap[p],heap[i]]=[heap[i],heap[p]];i=p;}}
+  function heapPop(){if(!heap.length)return null;const top=heap[0];const last=heap.pop();if(heap.length){heap[0]=last;let i=0;while(true){let best=i;const l=2*i+1,r=2*i+2;if(l<heap.length&&heap[l].w>heap[best].w)best=l;if(r<heap.length&&heap[r].w>heap[best].w)best=r;if(best===i)break;[heap[i],heap[best]]=[heap[best],heap[i]];i=best;}}return top;}
+
+  for(let r=0;r<seeds.length;r++){
+    label[seeds[r]]=r;
+    for(const e of adj[seeds[r]]) if(label[e.to]<0) heapPush({fi:e.to,region:r,w:e.w});
+  }
+  while(heap.length){
+    const {fi,region}=heapPop();
+    if(label[fi]>=0) continue;
+    label[fi]=region;
+    for(const e of adj[fi]) if(label[e.to]<0) heapPush({fi:e.to,region,w:e.w});
+  }
+
+  // Assign any disconnected faces to nearest seed
+  for(let i=0;i<nF;i++){
+    if(label[i]>=0) continue;
+    let minD=Infinity,minR=0;
+    for(let r=0;r<seeds.length;r++){
+      const d=(faces[i].cx-faces[seeds[r]].cx)**2+(faces[i].cy-faces[seeds[r]].cy)**2+(faces[i].cz-faces[seeds[r]].cz)**2;
+      if(d<minD){minD=d;minR=r;}
+    }
+    label[i]=minR;
+  }
+
+  // 5. Collect groups + balance (split oversized, merge tiny)
+  const groups=Array.from({length:seeds.length},()=>[]);
+  for(let i=0;i<nF;i++) groups[label[i]].push(faces[i]);
+  let result=groups.filter(g=>g.length>0);
+  // Merge tiny pieces (< 5% of average) into nearest neighbour
+  const avgSize=nF/N;
+  result.sort((a,b)=>a.length-b.length);
+  while(result.length>1&&result[0].length<avgSize*0.05){
+    const tiny=result.shift();
+    const tc=tiny.reduce((s,f)=>({x:s.x+f.cx,y:s.y+f.cy,z:s.z+f.cz}),{x:0,y:0,z:0});
+    tc.x/=tiny.length;tc.y/=tiny.length;tc.z/=tiny.length;
+    let minD=Infinity,minI=0;
+    for(let i=0;i<result.length;i++){
+      const gc=result[i].reduce((s,f)=>({x:s.x+f.cx,y:s.y+f.cy,z:s.z+f.cz}),{x:0,y:0,z:0});
+      gc.x/=result[i].length;gc.y/=result[i].length;gc.z/=result[i].length;
+      const d=(tc.x-gc.x)**2+(tc.y-gc.y)**2+(tc.z-gc.z)**2;
+      if(d<minD){minD=d;minI=i;}
+    }
+    result[minI]=[...result[minI],...tiny];
+  }
+  console.log('[EdgeCut] '+nF+' faces → '+result.length+' pieces (target '+N+'), adj edges: '+edgeMap.size);
+  return result;
 }
 
 // ── MANUAL PLANE SPLITTER ─────────────────────────────────────
@@ -681,7 +854,8 @@ const G=(()=>{
   const camera=new THREE.PerspectiveCamera(46,1,.01,500);
   camera.position.set(0,4,12);
   const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
-  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  const isMobile=('ontouchstart' in window)||navigator.maxTouchPoints>0;
+  renderer.setPixelRatio(Math.min(devicePixelRatio,isMobile?1.5:2));
   renderer.shadowMap.enabled=true;
   renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 
@@ -690,7 +864,9 @@ const G=(()=>{
 
   scene.add(new THREE.AmbientLight(0xffffff,.8));
   const sun=new THREE.DirectionalLight(0xffffff,.85);
-  sun.position.set(6,10,8);sun.castShadow=true;scene.add(sun);
+  sun.position.set(6,10,8);sun.castShadow=true;
+  if(isMobile){sun.shadow.mapSize.width=512;sun.shadow.mapSize.height=512;}
+  scene.add(sun);
   const fill=new THREE.DirectionalLight(0xd0e0ff,.22);fill.position.set(-6,3,-6);scene.add(fill);
   const fill2=new THREE.DirectionalLight(0xfff0e0,.12);fill2.position.set(3,-2,6);scene.add(fill2);
 
@@ -738,8 +914,9 @@ const G=(()=>{
     g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+dur);
     o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+dur);
   }
-  function sfxSnap(){playTone(880,.12,'sine',.15);setTimeout(()=>playTone(1320,.1,'sine',.1),60);}
-  function sfxWin(){[0,120,240,360,480].forEach((d,i)=>setTimeout(()=>playTone([523,659,784,1047,1319][i],.25,'triangle',.13),d));}
+  function haptic(ms){try{navigator.vibrate&&navigator.vibrate(ms||10);}catch(e){}}
+  function sfxSnap(){playTone(880,.12,'sine',.15);setTimeout(()=>playTone(1320,.1,'sine',.1),60);haptic(12);}
+  function sfxWin(){[0,120,240,360,480].forEach((d,i)=>setTimeout(()=>playTone([523,659,784,1047,1319][i],.25,'triangle',.13),d));haptic([30,50,30,50,80]);}
   function sfxUndo(){playTone(440,.08,'square',.06);setTimeout(()=>playTone(330,.08,'square',.05),50);}
   function updateMuteBtn(){document.getElementById('muteBtn').textContent=sfxMuted?'🔇':'🔊';}
 
@@ -783,9 +960,10 @@ const G=(()=>{
     if(dir<0){tip.rotation.z=Math.PI;}
     g.add(shaft);g.add(tip);
     g.userData.arrowDir=dir;
-    // Invisible hit area (sized for touch)
+    // Invisible hit area (larger on mobile for iPhone touch)
+    const hitR=isMobile?.5:.3,hitH=isMobile?1.2:.8;
     const hit=new THREE.Mesh(
-      new THREE.CylinderGeometry(.3,.3,.8,8),
+      new THREE.CylinderGeometry(hitR,hitR,hitH,8),
       new THREE.MeshBasicMaterial({visible:false})
     );
     hit.userData.arrowDir=dir;
@@ -1182,6 +1360,9 @@ const G=(()=>{
         orb.r=16;orb.theta=.4;orb.phi=.95;orb.tx=0;orb.ty=0;orb.tz=0;orb.update();
         refreshAll();
         showToast();
+        // Show home button if there are multiple levels
+        const hb=document.getElementById('homeBtn');
+        if(hb) hb.style.display=levels.length>1?'flex':'none';
       }
 
       if(tex){
@@ -1477,6 +1658,9 @@ const G=(()=>{
     undo(){undoMove();},
     showLevelSelect(){showLevelSelect();},
     selectLevel(i){hideLevelSelect();buildPuzzle(i);},
+    goHome(){
+      if(levels.length>1) showLevelSelect();
+    },
     nextLevel(){
       document.getElementById('winModal').classList.remove('show');
       if(curIdx<levels.length-1) buildPuzzle(curIdx+1);
