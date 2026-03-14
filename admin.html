@@ -115,6 +115,9 @@ html,body{min-height:100%;background:var(--bg);color:var(--t);font-family:'Jost'
 .pieceItem .pcCount{font-size:10px;color:var(--m)}
 .pieceItem .pcDel{background:none;border:none;color:var(--m);cursor:pointer;font-size:13px;padding:0 4px}
 .pieceItem .pcDel:hover{color:var(--red)}
+.pcSubBtns{display:flex;gap:3px;flex-shrink:0}
+.pcSub{background:var(--bg);border:1px solid var(--b);border-radius:3px;font-family:'Jost',sans-serif;font-size:9px;padding:3px 7px;cursor:pointer;color:var(--m);transition:all .15s;letter-spacing:.02em;white-space:nowrap}
+.pcSub:hover{border-color:var(--a);color:var(--a);background:#fdf8f0}
 .unassignedInfo{font-size:10px;color:var(--m);padding:6px 0;display:flex;align-items:center;gap:6px}
 .unassignedInfo .dot{width:10px;height:10px;border-radius:2px;background:#555;flex-shrink:0}
 .paintToolbar{display:flex;gap:6px;margin:10px 0;flex-wrap:wrap}
@@ -291,8 +294,15 @@ html,body{min-height:100%;background:var(--bg);color:var(--t);font-family:'Jost'
             <button class="cutMode" id="cutModeBox" onclick="setCutMode('box')">Box</button>
           </div>
 
-          <!-- Auto info -->
-          <div id="cutAutoInfo" style="font-size:10px;color:var(--m);margin-bottom:10px">Edge-aware cut: pieces break along sharp edges, object boundaries, and texture seams for realistic puzzle pieces.</div>
+          <!-- Smart mode info + piece list -->
+          <div id="cutAutoInfo" style="font-size:10px;color:var(--m);margin-bottom:10px">
+            Edge-aware cut along sharp edges, object boundaries, and texture seams.<br>
+            Click <b>÷2</b> or <b>÷3</b> on any piece to subdivide it for more difficulty.
+            <div id="smartPieceList" class="pieceList" style="margin-top:10px"></div>
+            <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+              <button class="paintBtn" onclick="resetSmartCut()" style="font-size:10px">Reset to initial cut</button>
+            </div>
+          </div>
 
           <!-- Manual planes info -->
           <div id="cutManualInfo" style="font-size:10px;color:var(--m);margin-bottom:10px;display:none">
@@ -627,6 +637,13 @@ function syncField(field,val){
   levels[selIdx][field]=val;
   markDirty();
   if(field==='name'||field==='pieces') renderList();
+  // When piece count changes, reset smart cut so it re-splits with new count
+  if(field==='pieces'&&(cutMode==='auto'||levels[selIdx].cutMode==='smart')){
+    levels[selIdx].cutGroups=null;
+    smartGroups=[];smartHighlight=-1;
+    cutFacesCache=null;cutBoundsCache=null;
+    refreshUnifiedPreview();
+  }
 }
 
 function addLevel(){
@@ -1273,6 +1290,166 @@ function buildCutGeo(fg){
   return bg;
 }
 
+// ── SMART CUT STATE (face-index groups with per-piece subdivide) ──
+let smartGroups=[];      // array of face-index arrays: [[0,3,5],[1,2,4],...]
+let smartHighlight=-1;   // index of highlighted piece in preview
+
+function initSmartCut(){
+  if(!cutFacesCache) return;
+  const l=levels[selIdx];
+  const N=l.pieces||15;
+  const groups=splitFaces(cutFacesCache,N);
+  // Convert face-object groups to face-index groups
+  smartGroups=groups.map(grp=>grp.map(f=>cutFacesCache.indexOf(f)).filter(i=>i>=0));
+  saveSmartGroups();
+  renderSmartPreview();
+  renderSmartPieceList();
+}
+
+function resetSmartCut(){
+  smartGroups=[];smartHighlight=-1;
+  if(selIdx>=0){ levels[selIdx].cutGroups=null; }
+  cutFacesCache=null;cutBoundsCache=null;
+  refreshCutPreview();
+}
+
+function subdividePiece(idx,n){
+  if(idx<0||idx>=smartGroups.length||!cutFacesCache) return;
+  const faceIdxs=smartGroups[idx];
+  if(faceIdxs.length<n*2) { toast('Piece too small to subdivide further'); return; }
+  // Extract faces for this piece
+  const subFaces=faceIdxs.map(i=>cutFacesCache[i]);
+  // Run edge-aware split on just this piece
+  const subGroups=splitFaces(subFaces,n);
+  // Convert back to global face indices
+  const newGroups=subGroups.map(grp=>
+    grp.map(f=>{ for(let i=0;i<faceIdxs.length;i++) if(cutFacesCache[faceIdxs[i]]===f) return faceIdxs[i]; return -1; }).filter(i=>i>=0)
+  );
+  // Replace the original piece with the sub-pieces
+  smartGroups.splice(idx,1,...newGroups);
+  smartHighlight=-1;
+  saveSmartGroups();
+  renderSmartPreview();
+  renderSmartPieceList();
+  toast('Piece split into '+newGroups.length+' sub-pieces ('+smartGroups.length+' total)');
+}
+
+function mergePiece(idx){
+  // Merge piece with its smallest neighbor (by shared-edge count / proximity)
+  if(idx<0||idx>=smartGroups.length||smartGroups.length<=1) return;
+  const piece=smartGroups[idx];
+  // Find nearest piece by centroid distance
+  const cx=piece.reduce((s,fi)=>s+cutFacesCache[fi].cx,0)/piece.length;
+  const cy=piece.reduce((s,fi)=>s+cutFacesCache[fi].cy,0)/piece.length;
+  const cz=piece.reduce((s,fi)=>s+cutFacesCache[fi].cz,0)/piece.length;
+  let minD=Infinity,minI=-1;
+  for(let i=0;i<smartGroups.length;i++){
+    if(i===idx) continue;
+    const g=smartGroups[i];
+    const gx=g.reduce((s,fi)=>s+cutFacesCache[fi].cx,0)/g.length;
+    const gy=g.reduce((s,fi)=>s+cutFacesCache[fi].cy,0)/g.length;
+    const gz=g.reduce((s,fi)=>s+cutFacesCache[fi].cz,0)/g.length;
+    const d=(cx-gx)**2+(cy-gy)**2+(cz-gz)**2;
+    if(d<minD){minD=d;minI=i;}
+  }
+  if(minI<0) return;
+  // Merge into the neighbor
+  smartGroups[minI]=[...smartGroups[minI],...piece];
+  smartGroups.splice(idx,1);
+  smartHighlight=-1;
+  saveSmartGroups();
+  renderSmartPreview();
+  renderSmartPieceList();
+  toast('Merged — now '+smartGroups.length+' pieces');
+}
+
+function saveSmartGroups(){
+  if(selIdx<0) return;
+  levels[selIdx].cutGroups=smartGroups.map(g=>[...g]);
+  levels[selIdx].cutMode='smart';
+  markDirty();
+}
+
+function renderSmartPieceList(){
+  const el=document.getElementById('smartPieceList');
+  if(!el) return;
+  if(!smartGroups.length){
+    el.innerHTML='';
+    document.getElementById('cutPieceCount').textContent='';
+    return;
+  }
+  el.innerHTML=smartGroups.map((g,i)=>{
+    const col='#'+CUT_COLORS[i%CUT_COLORS.length].toString(16).padStart(6,'0');
+    const hl=i===smartHighlight?' active':'';
+    return `<div class="pieceItem${hl}" onclick="highlightSmartPiece(${i})">
+      <div class="pcSwatch" style="background:${col}"></div>
+      <span class="pcLabel">Piece ${i+1}</span>
+      <span class="pcCount">${g.length} tri</span>
+      <div class="pcSubBtns">
+        <button class="pcSub" onclick="event.stopPropagation();subdividePiece(${i},2)" title="Split into 2">÷2</button>
+        <button class="pcSub" onclick="event.stopPropagation();subdividePiece(${i},3)" title="Split into 3">÷3</button>
+        <button class="pcSub" onclick="event.stopPropagation();mergePiece(${i})" title="Merge with neighbor">⊕</button>
+      </div>
+    </div>`;
+  }).join('');
+  const total=smartGroups.reduce((s,g)=>s+g.length,0);
+  document.getElementById('cutPieceCount').textContent=smartGroups.length+' piece'+(smartGroups.length===1?'':'s')+' · '+total+' triangles';
+}
+
+function highlightSmartPiece(idx){
+  smartHighlight=smartHighlight===idx?-1:idx;
+  renderSmartPreview();
+  renderSmartPieceList();
+}
+
+function renderSmartPreview(){
+  if(!cutFacesCache||!smartGroups.length) return;
+  if(!cutRenderer) initCutPreview();
+  if(!cutScene) return;
+  // Clear old meshes
+  cutPieceMeshes.forEach(m=>{cutScene.remove(m);m.geometry.dispose();m.material.dispose();});
+  cutPieceMeshes=[];
+  cutScene.children.filter(c=>c.userData.isCutPlane).forEach(c=>cutScene.remove(c));
+
+  const SHRINK=0.025;
+  smartGroups.forEach((group,gi)=>{
+    const faces=group.map(fi=>cutFacesCache[fi]).filter(Boolean);
+    if(!faces.length) return;
+    let pcx=0,pcy=0,pcz=0,cnt=0;
+    for(const f of faces){for(const v of f.pos){pcx+=v[0];pcy+=v[1];pcz+=v[2];cnt++;}}
+    pcx/=cnt;pcy/=cnt;pcz/=cnt;
+    const gv=[],gn=[];
+    for(const f of faces){
+      for(let k=0;k<3;k++){
+        const v=f.pos[k];
+        gv.push(v[0]+(pcx-v[0])*SHRINK,v[1]+(pcy-v[1])*SHRINK,v[2]+(pcz-v[2])*SHRINK);
+        if(f.nor&&f.nor[k]) gn.push(f.nor[k][0],f.nor[k][1],f.nor[k][2]);
+      }
+    }
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.Float32BufferAttribute(gv,3));
+    if(gn.length===gv.length) geo.setAttribute('normal',new THREE.Float32BufferAttribute(gn,3));
+    else geo.computeVertexNormals();
+    const isHighlighted=gi===smartHighlight;
+    const baseColor=CUT_COLORS[gi%CUT_COLORS.length];
+    const mat=new THREE.MeshStandardMaterial({
+      color:baseColor,roughness:.7,metalness:0,side:THREE.DoubleSide,
+      emissive:isHighlighted?baseColor:0x000000,
+      emissiveIntensity:isHighlighted?0.35:0
+    });
+    const mesh=new THREE.Mesh(geo,mat);
+    cutScene.add(mesh);cutPieceMeshes.push(mesh);
+  });
+
+  // Fit camera on first render
+  if(!cutOrb._fitted){
+    cutOrb.tx=0;cutOrb.ty=0;cutOrb.tz=0;cutOrb.r=4;cutOrb.ph=.8;cutOrb.th=.5;
+    cutOrb._fitted=true;
+    updateCutOrb();
+  }
+  document.getElementById('cutCard').style.display='block';
+}
+
 // ── PAINTED MODE STATE ──
 let paintTool='draw';      // 'draw' or 'orbit'
 let paintGroups=[];        // array of arrays of face indices: [[0,3,5],[1,2,4],...]
@@ -1305,8 +1482,9 @@ function setCutMode(mode){
   updateToolHint();
   if(selIdx>=0){
     levels[selIdx].cutMode=mode;
-    if(mode==='auto'){ levels[selIdx].cutPlanes=[]; levels[selIdx].cutGroups=null; }
-    if(mode==='manual'){ levels[selIdx].cutGroups=null; }
+    if(mode==='auto'){ levels[selIdx].cutPlanes=[]; /* cutGroups will be set by initSmartCut */ }
+    if(mode==='manual'){ levels[selIdx].cutGroups=null;smartGroups=[];smartHighlight=-1; }
+    if(mode==='lasso'||mode==='box'){smartGroups=[];smartHighlight=-1;}
     markDirty();
   }
   // Reset painted state when switching to lasso/box
@@ -1812,12 +1990,28 @@ function refreshCutPreview(){
   // Also clear plane helpers
   if(cutScene) cutScene.children.filter(c=>c.userData.isCutPlane).forEach(c=>cutScene.remove(c));
 
-  // Split
+  // For smart mode: use smartGroups if they exist, or do initial cut + store
+  if(cutMode==='auto'||cutMode==='smart'){
+    // If we have saved smartGroups (from subdivisions), restore them
+    if(l.cutGroups&&l.cutGroups.length&&(l.cutMode==='smart'||l.cutMode==='auto')){
+      smartGroups=l.cutGroups.map(g=>[...g]);
+    } else {
+      // Initial smart cut
+      const groups=splitFaces(cutFacesCache,l.pieces||15);
+      smartGroups=groups.map(grp=>grp.map(f=>cutFacesCache.indexOf(f)).filter(i=>i>=0));
+      saveSmartGroups();
+    }
+    renderSmartPreview();
+    renderSmartPieceList();
+    return; // renderSmartPreview handles mesh creation + camera
+  }
+
+  // Split (manual planes mode)
   let groups;
   if(cutMode==='manual'&&cutPlanes.length){
     groups=splitByPlanes(cutFacesCache,cutPlanes,cutBoundsCache);
   } else {
-    groups=splitFaces(cutFacesCache,l.pieces||15);
+    groups=splitFacesGrid(cutFacesCache,l.pieces||15);
   }
 
   // Build meshes with distinct colors and small gaps
@@ -1889,8 +2083,12 @@ showCalibSection=function(l,resetSliders){
   cutFacesCache=null;cutBoundsCache=null;cutOrb._fitted=false;
   // Load saved cut settings
   cutMode=l.cutMode||'auto';
+  // 'smart' uses the same UI as 'auto' (the Smart button)
+  if(cutMode==='smart') cutMode='auto';
   cutPlanes=l.cutPlanes?[...l.cutPlanes]:[];
   paintGroups=l.cutGroups?l.cutGroups.map(g=>[...g]):[];
+  smartGroups=(l.cutMode==='smart'&&l.cutGroups)?l.cutGroups.map(g=>[...g]):[];
+  smartHighlight=-1;
   paintSelection=new Set();
 
   document.getElementById('cutModeAuto').classList.toggle('active',cutMode==='auto');

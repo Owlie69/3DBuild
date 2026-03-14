@@ -1313,7 +1313,7 @@ const G=(()=>{
 
         // Build pieces — auto grid, manual planes, or painted groups (lasso/box)
         let chunks;
-        if((lvl.cutMode==='lasso'||lvl.cutMode==='box')&&lvl.cutGroups&&lvl.cutGroups.length){
+        if((lvl.cutMode==='lasso'||lvl.cutMode==='box'||lvl.cutMode==='smart')&&lvl.cutGroups&&lvl.cutGroups.length){
           // Painted mode: use stored face-index groups
           chunks=lvl.cutGroups.map(idxs=>idxs.map(i=>nf[i]).filter(Boolean));
           // Add any unassigned faces as one extra chunk
