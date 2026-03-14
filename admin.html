@@ -252,18 +252,15 @@ html,body{min-height:100%;background:var(--bg);color:var(--t);font-family:'Jost'
             <button class="fx" onclick="clearModel()">✕</button>
           </div>
 
-          <!-- 3D preview + calibration sliders — shown after model loaded -->
+          <!-- Calibration sliders — shown after model loaded (3D preview is in the unified cut card below) -->
           <div id="calibSection" style="display:none;margin-top:18px">
-            <div style="font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--m);margin-bottom:14px;padding-top:14px;border-top:1px solid var(--b)">Calibration</div>
+            <div style="font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--m);margin-bottom:14px;padding-top:14px;border-top:1px solid var(--b)">Orientation &amp; Position</div>
             <div class="calibRow"><label>Rotate X</label><input type="range" id="cRX" min="-180" max="180" value="0" oninput="updateCalib()"><span class="cv" id="cRXv">0°</span></div>
             <div class="calibRow"><label>Rotate Y</label><input type="range" id="cRY" min="-180" max="180" value="0" oninput="updateCalib()"><span class="cv" id="cRYv">0°</span></div>
             <div class="calibRow"><label>Rotate Z</label><input type="range" id="cRZ" min="-180" max="180" value="0" oninput="updateCalib()"><span class="cv" id="cRZv">0°</span></div>
             <div class="calibRow"><label>Move up/down</label><input type="range" id="cOY" min="-3" max="3" step="0.05" value="0" oninput="updateOffsetY()"><span class="cv" id="cOYv">0</span></div>
-            <div class="preview3d" id="previewContainer">
-              <canvas id="previewCanvas"></canvas>
-              <div class="previewHint">Drag to orbit · scroll to zoom</div>
-            </div>
-            <button onclick="resetCalib()" style="margin-top:10px;background:none;border:1px solid var(--b);color:var(--m);font-family:'Jost',sans-serif;font-size:10px;padding:6px 14px;border-radius:3px;cursor:pointer;letter-spacing:.05em">Reset all</button>
+            <button onclick="resetCalib()" style="margin-top:4px;background:none;border:1px solid var(--b);color:var(--m);font-family:'Jost',sans-serif;font-size:10px;padding:6px 14px;border-radius:3px;cursor:pointer;letter-spacing:.05em">Reset all</button>
+            <div style="font-size:10px;color:var(--m);margin-top:8px">Adjust orientation above — see live result in the 3D preview below.</div>
           </div>
         </div>
 
@@ -284,18 +281,18 @@ html,body{min-height:100%;background:var(--bg);color:var(--t);font-family:'Jost'
           <img id="skyThumb" class="skyThumb">
         </div>
 
-        <!-- Puzzle Cut Preview -->
+        <!-- Unified 3D Preview & Puzzle Cuts -->
         <div class="card" id="cutCard" style="display:none">
-          <div class="cardHead">Puzzle Cut Preview</div>
+          <div class="cardHead">3D Preview &amp; Puzzle Cuts</div>
           <div class="cutModes">
-            <button class="cutMode active" id="cutModeAuto" onclick="setCutMode('auto')">Random</button>
+            <button class="cutMode active" id="cutModeAuto" onclick="setCutMode('auto')">Smart</button>
             <button class="cutMode" id="cutModeManual" onclick="setCutMode('manual')">Planes</button>
             <button class="cutMode" id="cutModeLasso" onclick="setCutMode('lasso')">Lasso</button>
             <button class="cutMode" id="cutModeBox" onclick="setCutMode('box')">Box</button>
           </div>
 
           <!-- Auto info -->
-          <div id="cutAutoInfo" style="font-size:10px;color:var(--m);margin-bottom:10px">The model will be split into a 3D grid based on piece count.</div>
+          <div id="cutAutoInfo" style="font-size:10px;color:var(--m);margin-bottom:10px">Edge-aware cut: pieces break along sharp edges, object boundaries, and texture seams for realistic puzzle pieces.</div>
 
           <!-- Manual planes info -->
           <div id="cutManualInfo" style="font-size:10px;color:var(--m);margin-bottom:10px;display:none">
@@ -669,7 +666,7 @@ function handleModel(file){
   const reader=new FileReader();
   reader.onload=e=>{
     levels[idx]._buf=e.target.result; // store raw ArrayBuffer on the level
-    showCalibSection(levels[idx], true); // showCalibSection calls initPreview
+    showCalibSection(levels[idx], true); // showCalibSection triggers unified 3D preview
   };
   reader.readAsArrayBuffer(file);
   markDirty();
@@ -687,6 +684,11 @@ function clearModelUI(){
 }
 
 function showCalibSection(l, resetSliders){
+  if(!l._buf&&!l.modelData){
+    document.getElementById('calibSection').style.display='none';
+    document.getElementById('cutCard').style.display='none';
+    return;
+  }
   document.getElementById('calibSection').style.display='block';
   if(resetSliders){ l.calibRX=0;l.calibRY=0;l.calibRZ=0;l.offsetY=0; }
   document.getElementById('cRX').value=l.calibRX||0;
@@ -695,23 +697,16 @@ function showCalibSection(l, resetSliders){
   document.getElementById('cOY').value=l.offsetY||0;
   document.getElementById('cOYv').textContent=(l.offsetY||0).toFixed(2);
   updateCalibLabels();
-  if(l._buf){
-    // Already have raw ArrayBuffer from this session upload — use directly
-    initPreview(l._buf);
-  } else if(l.modelData){
-    // Loaded from existing levels.json — decode base64 to buffer
+  // Ensure buffer is ready
+  if(!l._buf&&l.modelData){
     const b64=l.modelData.replace(/\s/g,'');
     const bin=atob(b64);
     const buf=new ArrayBuffer(bin.length);
     const u8=new Uint8Array(buf);
     for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
-    l._buf=buf; // cache it so switching back is instant
-    initPreview(buf);
-  } else {
-    // No model — clear preview
-    if(previewModel&&prevScene){prevScene.remove(previewModel);previewModel=null;}
-    document.getElementById('calibSection').style.display='none';
+    l._buf=buf;
   }
+  // The unified 3D preview is handled by the cut card — trigger it via the hook
 }
 
 function updateCalib(){
@@ -720,16 +715,25 @@ function updateCalib(){
   levels[selIdx].calibRX=+document.getElementById('cRX').value;
   levels[selIdx].calibRY=+document.getElementById('cRY').value;
   levels[selIdx].calibRZ=+document.getElementById('cRZ').value;
-  if(previewModel) applyCalib();
   markDirty();
+  // Rebuild face cache with new rotation and refresh unified preview
+  cutFacesCache=null;cutBoundsCache=null;
+  refreshUnifiedPreview();
 }
 function updateOffsetY(){
   const v=+document.getElementById('cOY').value;
   document.getElementById('cOYv').textContent=v.toFixed(2);
   if(selIdx<0)return;
   levels[selIdx].offsetY=v;
-  if(previewModel) previewModel.position.y=v;
   markDirty();
+  cutFacesCache=null;cutBoundsCache=null;
+  refreshUnifiedPreview();
+}
+// Refresh whichever cut mode is active
+function refreshUnifiedPreview(){
+  if(selIdx<0) return;
+  if(cutMode==='lasso'||cutMode==='box') renderPaintedPreview();
+  else refreshCutPreview();
 }
 function updateCalibLabels(){
   ['RX','RY','RZ'].forEach(a=>{document.getElementById('c'+a+'v').textContent=document.getElementById('c'+a).value+'°';});
@@ -739,111 +743,11 @@ function resetCalib(){
   document.getElementById('cOY').value=0;
   document.getElementById('cOYv').textContent='0';
   if(selIdx>=0) levels[selIdx].offsetY=0;
-  if(previewModel) previewModel.position.y=0;
   updateCalib();
 }
 
-// ── Inline preview renderer ────────────────────────────────────
-let prevRenderer=null, prevScene=null, prevCamera=null, previewModel=null;
-let prevOrb={r:4,th:.5,ph:.9,on:false,lx:0,ly:0,tx:0,ty:0,tz:0};
-let prevLoopRunning=false;
-
-function initPreview(arrayBuffer){
-  const container=document.getElementById('previewContainer');
-  const canvas=document.getElementById('previewCanvas');
-
-  function loadModel(){
-    // Dispose previous model properly
-    if(previewModel){
-      previewModel.traverse(c=>{
-        if(c.isMesh){c.geometry.dispose();if(c.material)c.material.dispose();}
-      });
-      prevScene.remove(previewModel);
-      previewModel=null;
-    }
-    try{
-      const prims=loadGLBSimple(arrayBuffer);
-      const group=primsToPreviewMesh(prims);
-      prevScene.add(group);
-      previewModel=group;
-      applyCalib();
-      // Fit camera — compute box AFTER adding to scene
-      const box=new THREE.Box3().setFromObject(group);
-      const sz=box.getSize(new THREE.Vector3()).length()||2;
-      const ctr=box.getCenter(new THREE.Vector3());
-      const oy=selIdx>=0?(levels[selIdx].offsetY||0):0;
-      group.position.y=oy;
-      prevOrb.tx=ctr.x; prevOrb.ty=ctr.y+oy; prevOrb.tz=ctr.z;
-      prevOrb.r=sz*2.0; prevOrb.ph=.8; prevOrb.th=.5;
-      updatePrevOrb();
-    }catch(err){console.error('preview parse error',err);}
-  }
-
-  function setupRenderer(){
-    const w=container.offsetWidth;
-    const h=260;
-    if(!w){setTimeout(setupRenderer,150);return;} // wait for real layout
-    if(!prevRenderer){
-      // First time — create renderer, scene, camera, lights, events
-      prevRenderer=new THREE.WebGLRenderer({canvas,antialias:true});
-      prevRenderer.setClearColor(0x15120e,1);
-      prevRenderer.setPixelRatio(window.devicePixelRatio);
-      prevRenderer.setSize(w,h);  // true = also set CSS
-      prevScene=new THREE.Scene();
-      prevCamera=new THREE.PerspectiveCamera(50,w/h,0.05,500);
-      prevScene.add(new THREE.AmbientLight(0xffffff,0.9));
-      const sun=new THREE.DirectionalLight(0xffffff,1.2);
-      sun.position.set(5,10,7);prevScene.add(sun);
-      const fill=new THREE.DirectionalLight(0x8090ff,0.3);
-      fill.position.set(-5,2,-5);prevScene.add(fill);
-      prevScene.add(new THREE.GridHelper(20,20,0x3a3428,0x252018));
-      // Resize
-      new ResizeObserver(()=>{
-        const nw=container.offsetWidth;
-        if(!nw||!prevRenderer)return;
-        prevRenderer.setSize(nw,h);
-        prevCamera.aspect=nw/h;prevCamera.updateProjectionMatrix();
-      }).observe(container);
-      // Orbit controls
-      canvas.addEventListener('mousedown',e=>{prevOrb.on=true;prevOrb.lx=e.clientX;prevOrb.ly=e.clientY;e.preventDefault();},false);
-      canvas.addEventListener('touchstart',e=>{const t=e.touches[0];prevOrb.on=true;prevOrb.lx=t.clientX;prevOrb.ly=t.clientY;},{passive:true});
-      window.addEventListener('mousemove',e=>{if(!prevOrb.on)return;prevOrb.th-=(e.clientX-prevOrb.lx)*.006;prevOrb.ph=Math.max(.05,Math.min(1.55,prevOrb.ph-(e.clientY-prevOrb.ly)*.006));prevOrb.lx=e.clientX;prevOrb.ly=e.clientY;updatePrevOrb();});
-      window.addEventListener('touchmove',e=>{if(!prevOrb.on)return;const t=e.touches[0];prevOrb.th-=(t.clientX-prevOrb.lx)*.006;prevOrb.ph=Math.max(.05,Math.min(1.55,prevOrb.ph-(t.clientY-prevOrb.ly)*.006));prevOrb.lx=t.clientX;prevOrb.ly=t.clientY;updatePrevOrb();},{passive:true});
-      window.addEventListener('mouseup',()=>prevOrb.on=false);
-      window.addEventListener('touchend',()=>prevOrb.on=false);
-      canvas.addEventListener('wheel',e=>{prevOrb.r=Math.max(.5,Math.min(40,prevOrb.r*(1+e.deltaY*.001)));updatePrevOrb();e.preventDefault();},{passive:false});
-      if(!prevLoopRunning){
-        prevLoopRunning=true;
-        (function loop(){requestAnimationFrame(loop);if(prevRenderer&&prevScene&&prevCamera)prevRenderer.render(prevScene,prevCamera);})();
-      }
-    } else {
-      prevRenderer.setSize(w,h);
-      prevCamera.aspect=w/h;prevCamera.updateProjectionMatrix();
-    }
-    loadModel();
-  }
-
-  // Give the DOM time to apply display:block and measure the container
-  setTimeout(setupRenderer, 120);
-}
-
-function applyCalib(){
-  if(!previewModel||selIdx<0)return;
-  const l=levels[selIdx];
-  previewModel.rotation.set(
-    (l.calibRX||0)*Math.PI/180,
-    (l.calibRY||0)*Math.PI/180,
-    (l.calibRZ||0)*Math.PI/180
-  );
-}
-function updatePrevOrb(){
-  if(!prevCamera)return;
-  prevCamera.position.set(
-    prevOrb.tx+prevOrb.r*Math.sin(prevOrb.ph)*Math.sin(prevOrb.th),
-    prevOrb.ty+prevOrb.r*Math.cos(prevOrb.ph),
-    prevOrb.tz+prevOrb.r*Math.sin(prevOrb.ph)*Math.cos(prevOrb.th)
-  );prevCamera.lookAt(prevOrb.tx,prevOrb.ty,prevOrb.tz);
-}
+// ── Calibration preview is now unified with the cut preview below ──
+// No separate renderer needed — the cut card is the single 3D viewport
 
 // ── Full GLB loader with node-tree walk — same as game, gives correct transforms + textures ──
 function loadGLBSimple(buf){
@@ -1156,17 +1060,42 @@ let cutBoundsCache=null; // {mnx,mny,mnz,mxx,mxy,mxz}
 let cutPieceMeshes=[]; // current preview meshes
 
 // Convert admin prims to face objects (same format as game)
-function primsToFaces(prims, sc, cx, cy, cz){
+// Applies calibration rotation + offset so faces match what the player sees
+function primsToFaces(prims, sc, cx, cy, cz, calibRX, calibRY, calibRZ, offsetY){
+  const _rx=(calibRX||0)*Math.PI/180, _ry=(calibRY||0)*Math.PI/180, _rz=(calibRZ||0)*Math.PI/180;
+  const cX=Math.cos(_rx),sX=Math.sin(_rx),cY=Math.cos(_ry),sY=Math.sin(_ry),cZ=Math.cos(_rz),sZ=Math.sin(_rz);
+  const oy=offsetY||0;
+  function rotV(v){
+    // ZYX Euler rotation (matches Three.js default order)
+    let x=v[0]*cZ-v[1]*sZ, y=v[0]*sZ+v[1]*cZ, z=v[2]; // Z
+    let x2=x*cY+z*sY, z2=-x*sY+z*cY; x=x2; z=z2;       // Y
+    let y2=y*cX-z*sX, z3=y*sX+z*cX;                       // X
+    return [x,y2,z3];
+  }
   const faces=[];
   for(const prim of prims){
     const {pos,nor,uv,col,idx}=prim;
     const triCount=idx?idx.length/3:pos.length/9;
     for(let t=0;t<triCount;t++){
       const vi=[idx?idx[t*3]:t*3, idx?idx[t*3+1]:t*3+1, idx?idx[t*3+2]:t*3+2];
-      const p=vi.map(i=>[(pos[i*3]-cx)*sc,(pos[i*3+1]-cy)*sc,(pos[i*3+2]-cz)*sc]);
-      const n=nor?vi.map(i=>[nor[i*3],nor[i*3+1],nor[i*3+2]]):[];
+      const p=vi.map(i=>{
+        const raw=[(pos[i*3]-cx)*sc,(pos[i*3+1]-cy)*sc,(pos[i*3+2]-cz)*sc];
+        const r=rotV(raw);
+        return [r[0],r[1]+oy,r[2]];
+      });
+      const n=nor?vi.map(i=>rotV([nor[i*3],nor[i*3+1],nor[i*3+2]])):[];
+      // Pass through UV and vertex colours for edge-aware cutting
+      const u=uv?vi.map(i=>[uv[i*2],uv[i*2+1]]):[];
+      let vc=[];
+      if(col){
+        const {data,isUint8,isVec4}=col;
+        const stride=isVec4?4:3;
+        vc=vi.map(i=>isUint8
+          ?[data[i*stride]/255,data[i*stride+1]/255,data[i*stride+2]/255]
+          :[data[i*stride],data[i*stride+1],data[i*stride+2]]);
+      }
       faces.push({
-        pos:p,nor:n,
+        pos:p,nor:n,uv:u,col:vc,
         cx:(p[0][0]+p[1][0]+p[2][0])/3,
         cy:(p[0][1]+p[1][1]+p[2][1])/3,
         cz:(p[0][2]+p[1][2]+p[2][2])/3
@@ -1176,8 +1105,8 @@ function primsToFaces(prims, sc, cx, cy, cz){
   return faces;
 }
 
-// Spatial grid splitter (same algorithm as game)
-function splitFaces(faces,N){
+// Grid splitter (fallback for tiny meshes)
+function splitFacesGrid(faces,N){
   if(!faces.length) return [];
   let mnx=Infinity,mny=Infinity,mnz=Infinity,mxx=-Infinity,mxy=-Infinity,mxz=-Infinity;
   for(const f of faces){mnx=Math.min(mnx,f.cx);mny=Math.min(mny,f.cy);mnz=Math.min(mnz,f.cz);mxx=Math.max(mxx,f.cx);mxy=Math.max(mxy,f.cy);mxz=Math.max(mxz,f.cz);}
@@ -1203,6 +1132,103 @@ function splitFaces(faces,N){
   groups.sort((a,b)=>b.length-a.length);
   while(groups.length>N){const a=groups.pop(),b=groups.pop();groups.push([...a,...b]);groups.sort((a,b)=>b.length-a.length);}
   return groups.filter(g=>g.length>0);
+}
+
+// Edge-aware splitter — cuts along sharp edges, colour boundaries, UV seams
+function splitFaces(faces,N){
+  if(!faces.length) return [];
+  if(N<=1) return [faces];
+  const nF=faces.length;
+  if(nF<N*2) return splitFacesGrid(faces,N);
+  // 1. Face normals
+  const normals=new Array(nF);
+  for(let i=0;i<nF;i++){
+    const [a,b,c]=faces[i].pos;
+    const ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2];
+    const vx=c[0]-a[0],vy=c[1]-a[1],vz=c[2]-a[2];
+    let nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;
+    const len=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
+    normals[i]=[nx/len,ny/len,nz/len];
+  }
+  // 2. Adjacency via shared edges
+  const eps=1e-4,q=v=>Math.round(v/eps),vk=v=>q(v[0])+','+q(v[1])+','+q(v[2]);
+  const edgeMap=new Map();
+  for(let fi=0;fi<nF;fi++){
+    const f=faces[fi];
+    for(let j=0;j<3;j++){
+      const k1=vk(f.pos[j]),k2=vk(f.pos[(j+1)%3]);
+      const ek=k1<k2?k1+'|'+k2:k2+'|'+k1;
+      if(!edgeMap.has(ek))edgeMap.set(ek,[]);
+      edgeMap.get(ek).push(fi);
+    }
+  }
+  const adj=Array.from({length:nF},()=>[]);
+  const hasCol=faces[0]&&faces[0].col&&faces[0].col.length>0;
+  for(const fList of edgeMap.values()){
+    for(let i=0;i<fList.length;i++) for(let j=i+1;j<fList.length;j++){
+      const a=fList[i],b=fList[j];
+      const dot=normals[a][0]*normals[b][0]+normals[a][1]*normals[b][1]+normals[a][2]*normals[b][2];
+      const angle=Math.acos(Math.max(-1,Math.min(1,dot)));
+      const angleW=Math.cos(angle*.5);
+      let colW=1.0;
+      if(hasCol&&faces[a].col&&faces[b].col){
+        const ca=faces[a].col,cb=faces[b].col;
+        let dr=0,dg=0,db=0;
+        for(let k=0;k<3;k++){dr+=(ca[k]?ca[k][0]:0)-(cb[k]?cb[k][0]:0);dg+=(ca[k]?ca[k][1]:0)-(cb[k]?cb[k][1]:0);db+=(ca[k]?ca[k][2]:0)-(cb[k]?cb[k][2]:0);}
+        dr/=3;dg/=3;db/=3;colW=1.0-Math.min(1.0,Math.sqrt(dr*dr+dg*dg+db*db)*3);
+      }
+      let uvW=1.0;
+      if(faces[a].uv&&faces[b].uv&&faces[a].uv.length===3&&faces[b].uv.length===3){
+        const posA=faces[a].pos,posB=faces[b].pos;
+        let sharedPairs=0,uvMatch=0;
+        for(let vi=0;vi<3;vi++) for(let vj=0;vj<3;vj++){
+          if(vk(posA[vi])===vk(posB[vj])){
+            sharedPairs++;
+            if(Math.abs(faces[a].uv[vi][0]-faces[b].uv[vj][0])+Math.abs(faces[a].uv[vi][1]-faces[b].uv[vj][1])<0.01) uvMatch++;
+          }
+        }
+        if(sharedPairs>=2&&uvMatch<sharedPairs) uvW=0.3;
+      }
+      const w=angleW*0.45+colW*0.3+uvW*0.25;
+      adj[a].push({to:b,w});adj[b].push({to:a,w});
+    }
+  }
+  // 3. Farthest-point seeding
+  const seeds=[0],dist=new Float32Array(nF).fill(Infinity);
+  for(let s=1;s<N&&s<nF;s++){
+    const last=seeds[s-1],lx=faces[last].cx,ly=faces[last].cy,lz=faces[last].cz;
+    for(let i=0;i<nF;i++){const d=(faces[i].cx-lx)**2+(faces[i].cy-ly)**2+(faces[i].cz-lz)**2;if(d<dist[i])dist[i]=d;}
+    let maxD=-1,maxI=0;
+    for(let i=0;i<nF;i++){if(dist[i]>maxD){maxD=dist[i];maxI=i;}}
+    seeds.push(maxI);
+  }
+  // 4. Priority-queue region growing
+  const label=new Int32Array(nF).fill(-1),heap=[];
+  function hPush(item){heap.push(item);let i=heap.length-1;while(i>0){const p=(i-1)>>1;if(heap[p].w>=heap[i].w)break;[heap[p],heap[i]]=[heap[i],heap[p]];i=p;}}
+  function hPop(){if(!heap.length)return null;const top=heap[0];const last=heap.pop();if(heap.length){heap[0]=last;let i=0;while(true){let best=i;const l=2*i+1,r=2*i+2;if(l<heap.length&&heap[l].w>heap[best].w)best=l;if(r<heap.length&&heap[r].w>heap[best].w)best=r;if(best===i)break;[heap[i],heap[best]]=[heap[best],heap[i]];i=best;}}return top;}
+  for(let r=0;r<seeds.length;r++){label[seeds[r]]=r;for(const e of adj[seeds[r]])if(label[e.to]<0)hPush({fi:e.to,region:r,w:e.w});}
+  while(heap.length){const{fi,region}=hPop();if(label[fi]>=0)continue;label[fi]=region;for(const e of adj[fi])if(label[e.to]<0)hPush({fi:e.to,region,w:e.w});}
+  for(let i=0;i<nF;i++){if(label[i]>=0)continue;let minD=Infinity,minR=0;for(let r=0;r<seeds.length;r++){const d=(faces[i].cx-faces[seeds[r]].cx)**2+(faces[i].cy-faces[seeds[r]].cy)**2+(faces[i].cz-faces[seeds[r]].cz)**2;if(d<minD){minD=d;minR=r;}}label[i]=minR;}
+  // 5. Collect + merge tiny
+  const groups=Array.from({length:seeds.length},()=>[]);
+  for(let i=0;i<nF;i++)groups[label[i]].push(faces[i]);
+  let result=groups.filter(g=>g.length>0);
+  const avgSize=nF/N;
+  result.sort((a,b)=>a.length-b.length);
+  while(result.length>1&&result[0].length<avgSize*0.05){
+    const tiny=result.shift();
+    const tc=tiny.reduce((s,f)=>({x:s.x+f.cx,y:s.y+f.cy,z:s.z+f.cz}),{x:0,y:0,z:0});
+    tc.x/=tiny.length;tc.y/=tiny.length;tc.z/=tiny.length;
+    let minD=Infinity,minI=0;
+    for(let i=0;i<result.length;i++){
+      const gc=result[i].reduce((s,f)=>({x:s.x+f.cx,y:s.y+f.cy,z:s.z+f.cz}),{x:0,y:0,z:0});
+      gc.x/=result[i].length;gc.y/=result[i].length;gc.z/=result[i].length;
+      const d=(tc.x-gc.x)**2+(tc.y-gc.y)**2+(tc.z-gc.z)**2;
+      if(d<minD){minD=d;minI=i;}
+    }
+    result[minI]=[...result[minI],...tiny];
+  }
+  return result;
 }
 
 // Manual plane splitter — splits faces by axis-aligned planes
@@ -1645,29 +1671,36 @@ function renderPieceList(){
   document.getElementById('cutPieceCount').textContent=paintGroups.length+' piece'+(paintGroups.length===1?'':'s')+' · '+total+' total faces';
 }
 
+// ── SHARED: build face cache with calibration applied ──
+function buildFaceCache(){
+  if(selIdx<0) return false;
+  const l=levels[selIdx];
+  let buf=l._buf;
+  if(!buf&&l.modelData){
+    const b64=l.modelData.replace(/\s/g,'');
+    const bin=atob(b64);buf=new ArrayBuffer(bin.length);
+    const u8=new Uint8Array(buf);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+    l._buf=buf;
+  }
+  if(!buf) return false;
+  const prims=loadGLBSimple(buf);
+  let mnx=Infinity,mny=Infinity,mnz=Infinity,mxx=-Infinity,mxy=-Infinity,mxz=-Infinity;
+  prims.forEach(({pos})=>{for(let i=0;i<pos.length;i+=3){mnx=Math.min(mnx,pos[i]);mxx=Math.max(mxx,pos[i]);mny=Math.min(mny,pos[i+1]);mxy=Math.max(mxy,pos[i+1]);mnz=Math.min(mnz,pos[i+2]);mxz=Math.max(mxz,pos[i+2]);}});
+  const cx=(mnx+mxx)/2,cy=(mny+mxy)/2,cz=(mnz+mxz)/2;
+  const sc=2.5/Math.max(mxx-mnx,mxy-mny,mxz-mnz,0.001);
+  // Apply calibration rotation + offset to face positions
+  cutFacesCache=primsToFaces(prims,sc,cx,cy,cz, l.calibRX,l.calibRY,l.calibRZ, l.offsetY);
+  let b={mnx:Infinity,mny:Infinity,mnz:Infinity,mxx:-Infinity,mxy:-Infinity,mxz:-Infinity};
+  for(const f of cutFacesCache){b.mnx=Math.min(b.mnx,f.cx);b.mny=Math.min(b.mny,f.cy);b.mnz=Math.min(b.mnz,f.cz);b.mxx=Math.max(b.mxx,f.cx);b.mxy=Math.max(b.mxy,f.cy);b.mxz=Math.max(b.mxz,f.cz);}
+  cutBoundsCache=b;
+  return true;
+}
+
 // ── RENDER PAINTED PREVIEW (lasso/box mode visualization) ──
 function renderPaintedPreview(){
-  // Build face cache if missing
+  // Build face cache if missing — WITH calibration applied
   if(!cutFacesCache){
-    if(selIdx<0) return;
-    const l=levels[selIdx];
-    if(!l._buf&&!l.modelData) return;
-    let buf=l._buf;
-    if(!buf&&l.modelData){
-      const b64=l.modelData.replace(/\s/g,'');
-      const bin=atob(b64);buf=new ArrayBuffer(bin.length);
-      const u8=new Uint8Array(buf);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
-    }
-    if(!buf) return;
-    const prims=loadGLBSimple(buf);
-    let mnx=Infinity,mny=Infinity,mnz=Infinity,mxx=-Infinity,mxy=-Infinity,mxz=-Infinity;
-    prims.forEach(({pos})=>{for(let i=0;i<pos.length;i+=3){mnx=Math.min(mnx,pos[i]);mxx=Math.max(mxx,pos[i]);mny=Math.min(mny,pos[i+1]);mxy=Math.max(mxy,pos[i+1]);mnz=Math.min(mnz,pos[i+2]);mxz=Math.max(mxz,pos[i+2]);}});
-    const cx=(mnx+mxx)/2,cy=(mny+mxy)/2,cz=(mnz+mxz)/2;
-    const sc=2.5/Math.max(mxx-mnx,mxy-mny,mxz-mnz,0.001);
-    cutFacesCache=primsToFaces(prims,sc,cx,cy,cz);
-    let b={mnx:Infinity,mny:Infinity,mnz:Infinity,mxx:-Infinity,mxy:-Infinity,mxz:-Infinity};
-    for(const f of cutFacesCache){b.mnx=Math.min(b.mnx,f.cx);b.mny=Math.min(b.mny,f.cy);b.mnz=Math.min(b.mnz,f.cz);b.mxx=Math.max(b.mxx,f.cx);b.mxy=Math.max(b.mxy,f.cy);b.mxz=Math.max(b.mxz,f.cz);}
-    cutBoundsCache=b;
+    if(!buildFaceCache()) return;
   }
   // Initialize renderer if needed
   if(!cutRenderer) initCutPreview();
@@ -1765,26 +1798,9 @@ function refreshCutPreview(){
   const l=levels[selIdx];
   if(!l._buf&&!l.modelData) return;
 
-  // Parse model to faces if not cached
+  // Parse model to faces if not cached — WITH calibration applied
   if(!cutFacesCache){
-    let buf=l._buf;
-    if(!buf&&l.modelData){
-      const b64=l.modelData.replace(/\s/g,'');
-      const bin=atob(b64);buf=new ArrayBuffer(bin.length);
-      const u8=new Uint8Array(buf);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
-    }
-    if(!buf) return;
-    const prims=loadGLBSimple(buf);
-    // Compute bounds for normalization
-    let mnx=Infinity,mny=Infinity,mnz=Infinity,mxx=-Infinity,mxy=-Infinity,mxz=-Infinity;
-    prims.forEach(({pos})=>{for(let i=0;i<pos.length;i+=3){mnx=Math.min(mnx,pos[i]);mxx=Math.max(mxx,pos[i]);mny=Math.min(mny,pos[i+1]);mxy=Math.max(mxy,pos[i+1]);mnz=Math.min(mnz,pos[i+2]);mxz=Math.max(mxz,pos[i+2]);}});
-    const cx=(mnx+mxx)/2,cy=(mny+mxy)/2,cz=(mnz+mxz)/2;
-    const sc=2.5/Math.max(mxx-mnx,mxy-mny,mxz-mnz,0.001);
-    cutFacesCache=primsToFaces(prims,sc,cx,cy,cz);
-    // Compute normalized bounds for the cut faces
-    let b={mnx:Infinity,mny:Infinity,mnz:Infinity,mxx:-Infinity,mxy:-Infinity,mxz:-Infinity};
-    for(const f of cutFacesCache){b.mnx=Math.min(b.mnx,f.cx);b.mny=Math.min(b.mny,f.cy);b.mnz=Math.min(b.mnz,f.cz);b.mxx=Math.max(b.mxx,f.cx);b.mxy=Math.max(b.mxy,f.cy);b.mxz=Math.max(b.mxz,f.cz);}
-    cutBoundsCache=b;
+    if(!buildFaceCache()) return;
   }
 
   // Initialize renderer if needed
@@ -1865,11 +1881,11 @@ function refreshCutPreview(){
   document.getElementById('cutCard').style.display='block';
 }
 
-// Show cut card when model is loaded (hook into showCalibSection)
+// Show unified 3D preview + cut card when model is loaded (hook into showCalibSection)
 const _origShowCalib=showCalibSection;
 showCalibSection=function(l,resetSliders){
   _origShowCalib(l,resetSliders);
-  // Reset cut cache when model changes
+  // Reset cut cache when model changes (will be rebuilt with calibration)
   cutFacesCache=null;cutBoundsCache=null;cutOrb._fitted=false;
   // Load saved cut settings
   cutMode=l.cutMode||'auto';
@@ -1896,14 +1912,14 @@ showCalibSection=function(l,resetSliders){
   renderCutPlaneList();
   // Always show the cut card when a model is loaded
   document.getElementById('cutCard').style.display='block';
-  // Delayed preview — let calibration preview init first
+  // Build unified preview with calibration applied
   setTimeout(()=>{
     if(cutMode==='lasso'||cutMode==='box'){
       renderPaintedPreview();
     } else {
       refreshCutPreview();
     }
-  },400);
+  },250);
 };
 </script>
 </body>
