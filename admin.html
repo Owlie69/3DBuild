@@ -131,6 +131,15 @@ html,body{min-height:100%;background:var(--bg);color:var(--t);font-family:'Jost'
 .cutPreview .drawOverlay.drawing{pointer-events:auto;cursor:crosshair}
 .cutPreview .toolHint{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:9px;color:rgba(255,255,255,.4);letter-spacing:.06em;pointer-events:none;z-index:3;white-space:nowrap}
 
+/* Editor tabs (Orientation / Puzzle Cuts) */
+.editorTabs{display:flex;gap:0;border:1px solid var(--b);border-radius:3px;overflow:hidden;margin-bottom:14px}
+.editorTab{flex:1;padding:7px 12px;background:var(--bg);border:none;font-family:'Jost',sans-serif;font-size:10px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;color:var(--m);transition:all .15s;text-align:center}
+.editorTab.active{background:var(--t);color:#fff}
+.editorTab:not(:last-child){border-right:1px solid var(--b)}
+.tabContent{padding-top:2px}
+.uzone-compact{padding:18px}
+.uzone-compact .uzIcon{font-size:18px;margin-bottom:4px}
+
 /* Danger */
 .dangerBtn{background:none;border:1px solid #e8c4c4;color:var(--red);border-radius:3px;padding:8px 16px;font-family:'Jost',sans-serif;font-size:11px;letter-spacing:.05em;cursor:pointer;transition:all .2s}
 .dangerBtn:hover{background:var(--red);color:#fff;border-color:var(--red)}
@@ -240,10 +249,12 @@ html,body{min-height:100%;background:var(--bg);color:var(--t);font-family:'Jost'
           </div>
         </div>
 
-        <!-- 3D Model + Calibration -->
-        <div class="card">
+        <!-- 3D Model — unified: upload, preview, orientation, puzzle cuts -->
+        <div class="card" id="cutCard">
           <div class="cardHead">3D Model</div>
-          <div class="uzone" id="modelZone">
+
+          <!-- Upload zone -->
+          <div class="uzone uzone-compact" id="modelZone">
             <input type="file" id="modelInput" accept=".glb,.obj" onchange="handleModel(this.files[0])">
             <div class="uzIcon">⬡</div>
             <div class="uzLabel">Click or drag a .glb or .obj file</div>
@@ -255,22 +266,89 @@ html,body{min-height:100%;background:var(--bg);color:var(--t);font-family:'Jost'
             <button class="fx" onclick="clearModel()">✕</button>
           </div>
 
-          <!-- Calibration sliders — shown after model loaded (3D preview is in the unified cut card below) -->
-          <div id="calibSection" style="display:none;margin-top:18px">
-            <div style="font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--m);margin-bottom:14px;padding-top:14px;border-top:1px solid var(--b)">Orientation &amp; Position</div>
-            <div class="calibRow"><label>Rotate X</label><input type="range" id="cRX" min="-180" max="180" value="0" oninput="updateCalib()"><span class="cv" id="cRXv">0°</span></div>
-            <div class="calibRow"><label>Rotate Y</label><input type="range" id="cRY" min="-180" max="180" value="0" oninput="updateCalib()"><span class="cv" id="cRYv">0°</span></div>
-            <div class="calibRow"><label>Rotate Z</label><input type="range" id="cRZ" min="-180" max="180" value="0" oninput="updateCalib()"><span class="cv" id="cRZv">0°</span></div>
-            <div class="calibRow"><label>Move up/down</label><input type="range" id="cOY" min="-3" max="3" step="0.05" value="0" oninput="updateOffsetY()"><span class="cv" id="cOYv">0</span></div>
-            <button onclick="resetCalib()" style="margin-top:4px;background:none;border:1px solid var(--b);color:var(--m);font-family:'Jost',sans-serif;font-size:10px;padding:6px 14px;border-radius:3px;cursor:pointer;letter-spacing:.05em">Reset all</button>
-            <div style="font-size:10px;color:var(--m);margin-top:8px">Adjust orientation above — see live result in the 3D preview below.</div>
+          <!-- 3D preview canvas (always visible when model loaded) -->
+          <div id="modelPreviewWrap" style="display:none">
+            <div class="cutPreview" id="cutPreviewContainer" style="margin-top:16px">
+              <canvas id="cutCanvas"></canvas>
+              <canvas class="drawOverlay" id="drawOverlay"></canvas>
+              <div class="toolHint" id="cutToolHint"></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+              <div style="font-size:10px;color:var(--m);flex:1" id="cutPieceCount"></div>
+              <button onclick="refreshCutPreview()" style="padding:6px 14px;background:var(--bg);border:1px solid var(--b);border-radius:3px;font-family:'Jost',sans-serif;font-size:10px;cursor:pointer;color:var(--m);transition:all .15s">Refresh</button>
+            </div>
+
+            <!-- Tab bar: Orientation | Puzzle Cuts -->
+            <div class="editorTabs" style="margin-top:16px">
+              <button class="editorTab active" id="tabOrient" onclick="switchEditorTab('orient')">Orientation</button>
+              <button class="editorTab" id="tabCuts" onclick="switchEditorTab('cuts')">Puzzle Cuts</button>
+            </div>
+
+            <!-- Orientation tab content -->
+            <div id="tabOrientContent" class="tabContent">
+              <div id="calibSection">
+                <div class="calibRow"><label>Rotate X</label><input type="range" id="cRX" min="-180" max="180" value="0" oninput="updateCalib()"><span class="cv" id="cRXv">0°</span></div>
+                <div class="calibRow"><label>Rotate Y</label><input type="range" id="cRY" min="-180" max="180" value="0" oninput="updateCalib()"><span class="cv" id="cRYv">0°</span></div>
+                <div class="calibRow"><label>Rotate Z</label><input type="range" id="cRZ" min="-180" max="180" value="0" oninput="updateCalib()"><span class="cv" id="cRZv">0°</span></div>
+                <div class="calibRow"><label>Move up / down</label><input type="range" id="cOY" min="-3" max="3" step="0.05" value="0" oninput="updateOffsetY()"><span class="cv" id="cOYv">0</span></div>
+                <div style="display:flex;gap:8px;align-items:center;margin-top:2px">
+                  <button onclick="resetCalib()" style="background:none;border:1px solid var(--b);color:var(--m);font-family:'Jost',sans-serif;font-size:10px;padding:5px 12px;border-radius:3px;cursor:pointer;letter-spacing:.05em">Reset</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Puzzle Cuts tab content -->
+            <div id="tabCutsContent" class="tabContent" style="display:none">
+              <div class="cutModes">
+                <button class="cutMode active" id="cutModeAuto" onclick="setCutMode('auto')">Smart</button>
+                <button class="cutMode" id="cutModeManual" onclick="setCutMode('manual')">Planes</button>
+                <button class="cutMode" id="cutModeLasso" onclick="setCutMode('lasso')">Lasso</button>
+                <button class="cutMode" id="cutModeBox" onclick="setCutMode('box')">Box</button>
+              </div>
+
+              <!-- Smart mode info + piece list -->
+              <div id="cutAutoInfo" style="font-size:10px;color:var(--m)">
+                Edge-aware cut along sharp edges, object boundaries, and texture seams.<br>
+                Click <b>÷2</b> or <b>÷3</b> on any piece to subdivide it for more difficulty.
+                <div id="smartPieceList" class="pieceList" style="margin-top:10px"></div>
+                <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+                  <button class="paintBtn" onclick="resetSmartCut()" style="font-size:10px">Reset to initial cut</button>
+                </div>
+              </div>
+
+              <!-- Manual planes info -->
+              <div id="cutManualInfo" style="font-size:10px;color:var(--m);display:none">
+                Add cut planes and rotate them freely. The model is sliced where each plane crosses it.
+                <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="cutPlaneAdd" onclick="addCutPlane('x')" style="padding:5px 12px;background:var(--bg);border:1px solid var(--b);border-radius:3px;font-family:'Jost',sans-serif;font-size:10px;cursor:pointer;color:var(--m);transition:all .15s">+ X plane</button>
+                  <button class="cutPlaneAdd" onclick="addCutPlane('y')" style="padding:5px 12px;background:var(--bg);border:1px solid var(--b);border-radius:3px;font-family:'Jost',sans-serif;font-size:10px;cursor:pointer;color:var(--m);transition:all .15s">+ Y plane</button>
+                  <button class="cutPlaneAdd" onclick="addCutPlane('z')" style="padding:5px 12px;background:var(--bg);border:1px solid var(--b);border-radius:3px;font-family:'Jost',sans-serif;font-size:10px;cursor:pointer;color:var(--m);transition:all .15s">+ Z plane</button>
+                </div>
+                <div class="cutPlaneList" id="cutPlaneList"></div>
+              </div>
+
+              <!-- Lasso / Box painted mode info -->
+              <div id="cutPaintedInfo" style="display:none">
+                <div style="font-size:10px;color:var(--m);margin-bottom:6px" id="cutPaintedHint">Draw on the model to select faces, then assign them to a piece.</div>
+                <div class="paintToolbar">
+                  <button class="paintBtn active" id="paintDrawBtn" onclick="setPaintTool('draw')">Select</button>
+                  <button class="paintBtn" id="paintOrbitBtn" onclick="setPaintTool('orbit')">Orbit</button>
+                  <span style="flex:1"></span>
+                  <button class="paintBtn" onclick="assignSelection()">Assign Piece</button>
+                  <button class="paintBtn" onclick="autoFillRemaining()">Auto-fill rest</button>
+                  <button class="paintBtn danger" onclick="undoLastPiece()">Undo last</button>
+                </div>
+                <div id="paintPieceList" class="pieceList"></div>
+                <div class="unassignedInfo" id="unassignedInfo"><span class="dot"></span> <span id="unassignedCount">0</span> unassigned faces</div>
+              </div>
+            </div>
           </div>
         </div>
 
         <!-- 360° Sky -->
         <div class="card">
           <div class="cardHead">360° Panorama <span style="font-weight:300;text-transform:none;letter-spacing:0;font-size:10px;color:var(--m)">(optional)</span></div>
-          <div class="uzone" id="skyZone">
+          <div class="uzone uzone-compact" id="skyZone">
             <input type="file" id="skyInput" accept="image/*" onchange="handleSky(this.files[0])">
             <div class="uzIcon">◉</div>
             <div class="uzLabel">Click or drag an equirectangular panorama</div>
@@ -282,64 +360,6 @@ html,body{min-height:100%;background:var(--bg);color:var(--t);font-family:'Jost'
             <button class="fx" onclick="clearSky()">✕</button>
           </div>
           <img id="skyThumb" class="skyThumb">
-        </div>
-
-        <!-- Unified 3D Preview & Puzzle Cuts -->
-        <div class="card" id="cutCard" style="display:none">
-          <div class="cardHead">3D Preview &amp; Puzzle Cuts</div>
-          <div class="cutModes">
-            <button class="cutMode active" id="cutModeAuto" onclick="setCutMode('auto')">Smart</button>
-            <button class="cutMode" id="cutModeManual" onclick="setCutMode('manual')">Planes</button>
-            <button class="cutMode" id="cutModeLasso" onclick="setCutMode('lasso')">Lasso</button>
-            <button class="cutMode" id="cutModeBox" onclick="setCutMode('box')">Box</button>
-          </div>
-
-          <!-- Smart mode info + piece list -->
-          <div id="cutAutoInfo" style="font-size:10px;color:var(--m);margin-bottom:10px">
-            Edge-aware cut along sharp edges, object boundaries, and texture seams.<br>
-            Click <b>÷2</b> or <b>÷3</b> on any piece to subdivide it for more difficulty.
-            <div id="smartPieceList" class="pieceList" style="margin-top:10px"></div>
-            <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-              <button class="paintBtn" onclick="resetSmartCut()" style="font-size:10px">Reset to initial cut</button>
-            </div>
-          </div>
-
-          <!-- Manual planes info -->
-          <div id="cutManualInfo" style="font-size:10px;color:var(--m);margin-bottom:10px;display:none">
-            Add cut planes and rotate them freely. The model is sliced where each plane crosses it.
-            <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-              <button class="cutPlaneAdd" onclick="addCutPlane('x')" style="padding:5px 12px;background:var(--bg);border:1px solid var(--b);border-radius:3px;font-family:'Jost',sans-serif;font-size:10px;cursor:pointer;color:var(--m);transition:all .15s">+ X plane</button>
-              <button class="cutPlaneAdd" onclick="addCutPlane('y')" style="padding:5px 12px;background:var(--bg);border:1px solid var(--b);border-radius:3px;font-family:'Jost',sans-serif;font-size:10px;cursor:pointer;color:var(--m);transition:all .15s">+ Y plane</button>
-              <button class="cutPlaneAdd" onclick="addCutPlane('z')" style="padding:5px 12px;background:var(--bg);border:1px solid var(--b);border-radius:3px;font-family:'Jost',sans-serif;font-size:10px;cursor:pointer;color:var(--m);transition:all .15s">+ Z plane</button>
-            </div>
-            <div class="cutPlaneList" id="cutPlaneList"></div>
-          </div>
-
-          <!-- Lasso / Box painted mode info -->
-          <div id="cutPaintedInfo" style="display:none">
-            <div style="font-size:10px;color:var(--m);margin-bottom:6px" id="cutPaintedHint">Draw on the model to select faces, then assign them to a piece.</div>
-            <div class="paintToolbar">
-              <button class="paintBtn active" id="paintDrawBtn" onclick="setPaintTool('draw')">Select</button>
-              <button class="paintBtn" id="paintOrbitBtn" onclick="setPaintTool('orbit')">Orbit</button>
-              <span style="flex:1"></span>
-              <button class="paintBtn" onclick="assignSelection()">Assign Piece</button>
-              <button class="paintBtn" onclick="autoFillRemaining()">Auto-fill rest</button>
-              <button class="paintBtn danger" onclick="undoLastPiece()">Undo last</button>
-            </div>
-            <div id="paintPieceList" class="pieceList"></div>
-            <div class="unassignedInfo" id="unassignedInfo"><span class="dot"></span> <span id="unassignedCount">0</span> unassigned faces</div>
-          </div>
-
-          <!-- 3D preview canvas + drawing overlay -->
-          <div class="cutPreview" id="cutPreviewContainer">
-            <canvas id="cutCanvas"></canvas>
-            <canvas class="drawOverlay" id="drawOverlay"></canvas>
-            <div class="toolHint" id="cutToolHint"></div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:10px">
-            <button onclick="refreshCutPreview()" style="flex:1;padding:8px;background:var(--bg);border:1px solid var(--b);border-radius:3px;font-family:'Jost',sans-serif;font-size:11px;cursor:pointer;color:var(--m);transition:all .15s">Refresh Preview</button>
-          </div>
-          <div style="font-size:10px;color:var(--m);margin-top:8px" id="cutPieceCount"></div>
         </div>
 
         <!-- Danger -->
@@ -695,18 +715,24 @@ function clearModel(){
 }
 function clearModelUI(){
   document.getElementById('modelInfo').style.display='none';
-  document.getElementById('calibSection').style.display='none';
-  document.getElementById('cutCard').style.display='none';
+  document.getElementById('modelPreviewWrap').style.display='none';
   cutFacesCache=null;cutBoundsCache=null;
+}
+
+function switchEditorTab(tab){
+  const isOrient=tab==='orient';
+  document.getElementById('tabOrient').classList.toggle('active',isOrient);
+  document.getElementById('tabCuts').classList.toggle('active',!isOrient);
+  document.getElementById('tabOrientContent').style.display=isOrient?'block':'none';
+  document.getElementById('tabCutsContent').style.display=isOrient?'none':'block';
 }
 
 function showCalibSection(l, resetSliders){
   if(!l._buf&&!l.modelData){
-    document.getElementById('calibSection').style.display='none';
-    document.getElementById('cutCard').style.display='none';
+    document.getElementById('modelPreviewWrap').style.display='none';
     return;
   }
-  document.getElementById('calibSection').style.display='block';
+  document.getElementById('modelPreviewWrap').style.display='block';
   if(resetSliders){ l.calibRX=0;l.calibRY=0;l.calibRZ=0;l.offsetY=0; }
   document.getElementById('cRX').value=l.calibRX||0;
   document.getElementById('cRY').value=l.calibRY||0;
@@ -1449,7 +1475,7 @@ function renderSmartPreview(){
     cutOrb._fitted=true;
     updateCutOrb();
   }
-  document.getElementById('cutCard').style.display='block';
+  document.getElementById('modelPreviewWrap').style.display='block';
 }
 
 // ── PAINTED MODE STATE ──
@@ -1999,7 +2025,7 @@ function renderPaintedPreview(){
     updateCutOrb();
   }
 
-  document.getElementById('cutCard').style.display='block';
+  document.getElementById('modelPreviewWrap').style.display='block';
   renderPieceList();
 }
 
@@ -2102,7 +2128,7 @@ function refreshCutPreview(){
   updateCutOrb();
 
   document.getElementById('cutPieceCount').textContent='Preview: '+groups.length+' piece'+(groups.length===1?'':'s')+' ('+cutFacesCache.length+' triangles)';
-  document.getElementById('cutCard').style.display='block';
+  document.getElementById('modelPreviewWrap').style.display='block';
 }
 
 // Show unified 3D preview + cut card when model is loaded (hook into showCalibSection)
@@ -2139,7 +2165,7 @@ showCalibSection=function(l,resetSliders){
   updateToolHint();
   renderCutPlaneList();
   // Always show the cut card when a model is loaded
-  document.getElementById('cutCard').style.display='block';
+  document.getElementById('modelPreviewWrap').style.display='block';
   // Build unified preview with calibration applied
   setTimeout(()=>{
     if(cutMode==='lasso'||cutMode==='box'){
